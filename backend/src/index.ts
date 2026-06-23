@@ -4,8 +4,9 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { config } from './config';
+import { validateEnv } from './config/validateEnv';
 import { errorHandler, notFound } from './middleware/error';
-import prisma from './config/prisma';
+import prisma, { verifyDatabaseConnection } from './config/prisma';
 import authRoutes from './routes/auth';
 import userRoutes from './routes/users';
 import transactionRoutes from './routes/transactions';
@@ -18,13 +19,37 @@ import adminRoutes from './routes/admin';
 import uploadRoutes from './routes/upload';
 import { getGeminiHealthStatus } from './services/gemini';
 import { asyncHandler } from './utils/asyncHandler';
+import { v4 as uuidv4 } from 'uuid';
+
+// ─── Validate Environment on Startup ───────────────────────────
+validateEnv();
 
 const app = express();
 
+// ─── Request ID Middleware ─────────────────────────────────────
+app.use((_req, res, next) => {
+  res.setHeader('X-Request-Id', uuidv4());
+  next();
+});
+
 // ─── Security Middleware ───────────────────────────────────────
 app.use(helmet());
+
+// Support multiple CORS origins for Vercel preview deployments
+const allowedOrigins = config.frontendUrl
+  .split(',')
+  .map((url) => url.trim())
+  .filter(Boolean);
+
 app.use(cors({
-  origin: config.frontendUrl,
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, health checks)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.some((allowed) => origin === allowed || origin.endsWith('.vercel.app'))) {
+      return callback(null, true);
+    }
+    callback(new Error('Not allowed by CORS'));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -36,14 +61,14 @@ const limiter = rateLimit({
   max: 100,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many requests, please try again later.' },
+  message: { success: false, error: 'Too many requests, please try again later.', message: 'Too many requests, please try again later.' },
 });
 app.use('/api/', limiter);
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
-  message: { error: 'Too many authentication attempts, please try again later.' },
+  message: { success: false, error: 'Too many authentication attempts, please try again later.', message: 'Too many authentication attempts, please try again later.' },
 });
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
@@ -73,10 +98,10 @@ app.get('/api/ai/health', asyncHandler(async (_req, res) => {
   const status = geminiStatus.status === 'connected' && databaseConnected ? 'healthy' : 'degraded';
 
   res.json({
+    status,
     geminiConfigured: geminiStatus.geminiConfigured,
     apiKeyLoaded: geminiStatus.apiKeyLoaded,
     databaseConnected,
-    status,
   });
 }));
 
@@ -97,28 +122,26 @@ app.use(notFound);
 app.use(errorHandler);
 
 // ─── Start Server ──────────────────────────────────────────────
-const server = app.listen(config.port, () => {
+const server = app.listen(config.port, async () => {
   console.log(`🚀 FinanceAI Backend running on port ${config.port}`);
   console.log(`📊 Environment: ${config.nodeEnv}`);
   console.log(`🟢 Node.js ${process.version}`);
+
+  // ── Verify Database Connection ──────────────────────────────
+  await verifyDatabaseConnection();
   
-  // ── Startup API Key Audit ──────────────────────────────────
-  console.log('\n─── API Key Audit ──────────────────────────────────────');
-  const isSecret = (name: string) => name.includes('SECRET') || name.includes('PASSWORD');
-  const keys = [
-    { name: 'GEMINI_API_KEY', value: config.gemini.apiKey },
-    { name: 'DATABASE_URL', value: config.database.url },
-    { name: 'JWT_SECRET', value: config.jwt.secret },
-    { name: 'GOOGLE_CLIENT_ID', value: config.google.clientId },
-    { name: 'CLOUDINARY_CLOUD_NAME', value: config.cloudinary.cloudName },
-    { name: 'RESEND_API_KEY', value: config.resend.apiKey },
+  // ── Startup Audit (production-safe) ─────────────────────────
+  console.log('\n─── Service Status ─────────────────────────────────────');
+  const services = [
+    { name: 'GEMINI_API_KEY', loaded: config.gemini.apiKey.length > 0 },
+    { name: 'DATABASE_URL', loaded: config.database.url.length > 0 },
+    { name: 'JWT_SECRET', loaded: config.jwt.secret !== 'fallback-secret' },
+    { name: 'GOOGLE_CLIENT_ID', loaded: config.google.clientId.length > 0 },
+    { name: 'CLOUDINARY', loaded: config.cloudinary.cloudName.length > 0 },
+    { name: 'RESEND', loaded: config.resend.apiKey.length > 0 },
   ];
-  for (const k of keys) {
-    const loaded = k.value.length > 0;
-    const preview = loaded
-      ? isSecret(k.name) ? '(set, hidden)' : `${k.value.slice(0, 8)}…`
-      : '(empty)';
-    console.log(`  ${loaded ? '✅' : '⚠️ '} ${k.name}: ${preview}`);
+  for (const s of services) {
+    console.log(`  ${s.loaded ? '✅' : '⚠️ '} ${s.name}: ${s.loaded ? 'configured' : 'not configured'}`);
   }
   console.log('───────────────────────────────────────────────────────\n');
 });
@@ -149,25 +172,15 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // ─── Global Error Handlers ─────────────────────────────────────
-// These prevent the libuv UV_HANDLE_CLOSING assertion crash on
-// Node.js v24 + Windows by catching errors that escape Express.
 process.on('uncaughtException', (err: Error) => {
-  console.error('💥 UNCAUGHT EXCEPTION:', err);
-  // Log the error but allow the process to finish current operations
-  // before exiting. This avoids the UV_HANDLE_CLOSING assertion
-  // caused by abruptly killing handles mid-operation.
+  console.error('💥 UNCAUGHT EXCEPTION:', err.message);
   gracefulShutdown('uncaughtException');
 });
 
 process.on('unhandledRejection', (reason: unknown) => {
   console.error('💥 UNHANDLED REJECTION:', reason);
-  // Don't crash the process — log it and keep running.
-  // Most unhandled rejections in Express come from async route
-  // handlers that forgot try/catch. The asyncHandler wrapper
-  // added to all routes fixes the root cause.
 });
 
-// Prevent the process from exiting immediately on unhandled rejection
 process.on('warning', (warning) => {
   console.warn('⚠️  Node.js warning:', warning.message);
 });

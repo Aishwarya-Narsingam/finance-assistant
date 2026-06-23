@@ -9,7 +9,7 @@ import { Request, Response, NextFunction, RequestHandler } from 'express';
  * libuv UV_HANDLE_CLOSING assertion on Windows.
  */
 export function asyncHandler(
-  fn: (req: Request, res: Response, next: NextFunction) => Promise<any>
+  fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>
 ): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
     Promise.resolve(fn(req, res, next)).catch(next);

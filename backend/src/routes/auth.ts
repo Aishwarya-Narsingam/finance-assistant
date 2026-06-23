@@ -67,10 +67,10 @@ router.post('/register', asyncHandler(async (req: AuthRequest, res: Response) =>
   });
 
   res.cookie('refreshToken', refreshToken, {
-    httpOnly: true,
-    secure: config.nodeEnv === 'production',
-    sameSite: 'strict',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
+    httpOnly: config.cookie.httpOnly,
+    secure: config.cookie.secure,
+    sameSite: config.cookie.sameSite,
+    maxAge: config.cookie.maxAge,
   });
 
   res.status(201).json({ user, accessToken });
@@ -118,10 +118,10 @@ router.post('/login', asyncHandler(async (req: AuthRequest, res: Response) => {
   });
 
   res.cookie('refreshToken', refreshToken, {
-    httpOnly: true,
-    secure: config.nodeEnv === 'production',
-    sameSite: 'strict',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
+    httpOnly: config.cookie.httpOnly,
+    secure: config.cookie.secure,
+    sameSite: config.cookie.sameSite,
+    maxAge: config.cookie.maxAge,
   });
 
   res.json({ user: userData, accessToken });
@@ -143,6 +143,11 @@ router.post('/refresh', asyncHandler(async (req: AuthRequest, res: Response) => 
   // Rotate refresh token
   await prisma.refreshToken.delete({ where: { id: storedToken.id } });
 
+  // Clean up expired refresh tokens for this user
+  await prisma.refreshToken.deleteMany({
+    where: { userId: payload.id, expiresAt: { lt: new Date() } },
+  });
+
   const user = await prisma.user.findUnique({
     where: { id: payload.id },
     select: { id: true, email: true, name: true, role: true },
@@ -163,10 +168,10 @@ router.post('/refresh', asyncHandler(async (req: AuthRequest, res: Response) => 
   });
 
   res.cookie('refreshToken', newRefreshToken, {
-    httpOnly: true,
-    secure: config.nodeEnv === 'production',
-    sameSite: 'strict',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
+    httpOnly: config.cookie.httpOnly,
+    secure: config.cookie.secure,
+    sameSite: config.cookie.sameSite,
+    maxAge: config.cookie.maxAge,
   });
 
   res.json({ accessToken: newAccessToken });
@@ -340,8 +345,11 @@ router.get('/google/callback', asyncHandler(async (req, res) => {
       },
     });
 
-    // Redirect to frontend with tokens
-    res.redirect(`${config.frontendUrl}/auth/callback?accessToken=${accessToken}&refreshToken=${refreshToken}`);
+    // Redirect to frontend with tokens (use HTTPS in production)
+    const frontendRedirect = process.env.NODE_ENV === 'production'
+      ? config.frontendUrl.replace(/^http:/i, 'https:')
+      : config.frontendUrl;
+    res.redirect(`${frontendRedirect}/auth/callback?accessToken=${accessToken}&refreshToken=${refreshToken}`);
   } catch (err) {
     console.error('Google OAuth error:', err);
     res.redirect(`${config.frontendUrl}/auth/login?error=google_auth_failed`);

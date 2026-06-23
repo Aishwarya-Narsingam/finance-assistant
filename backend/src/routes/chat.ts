@@ -122,10 +122,10 @@ router.post('/', authenticate, asyncHandler(async (req: AuthRequest, res: Respon
       // Fallback: treat as general chat
       await handleAIRoute('general_chat', userId, body.message, res, overallStart);
     }
-  } catch (unexpectedError: any) {
+  } catch (unexpectedError: unknown) {
     // ── Global catch-all: never crash ───────────────────────────
     const elapsed = Date.now() - overallStart;
-    console.error('💥 [Chat] Unexpected error:', unexpectedError.message || unexpectedError);
+    console.error('💥 [Chat] Unexpected error:', unexpectedError instanceof Error ? unexpectedError.message : unexpectedError);
 
     res.json({
       response: 'AI analysis is temporarily unavailable. Here is your available financial data...',
@@ -274,9 +274,9 @@ async function handleDirectQueryRoute(
       success: true,
       responseTimeMs: elapsed,
     });
-  } catch (dbError: any) {
+  } catch (dbError: unknown) {
     const elapsed = Date.now() - overallStart;
-    console.error('❌ [Chat] Database query failed:', dbError.message || dbError);
+    console.error('❌ [Chat] Database query failed:', dbError instanceof Error ? dbError.message : dbError);
 
     res.json({
       response: 'Unable to access financial records right now.',
@@ -377,10 +377,10 @@ async function handleAIRoute(
       aiAvailable: true,
       responseTimeMs: overallElapsed,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     // ── Catch-all error handler ───────────────────────────────
     const elapsed = Date.now() - overallStart;
-    console.error('❌ [Chat] AI route error:', error.message || error);
+    console.error('❌ [Chat] AI route error:', error instanceof Error ? error.message : error);
 
     const errorResponse = 'AI analysis is temporarily unavailable. Please try again in a few moments.';
 
@@ -541,8 +541,8 @@ router.post('/generate-budget', authenticate, asyncHandler(async (req: AuthReque
     }
 
     res.json({ suggestion: result.suggestion, success: true });
-  } catch (error: any) {
-    console.error('❌ [Budget] Error:', error.message || error);
+  } catch (error: unknown) {
+    console.error('❌ [Budget] Error:', error instanceof Error ? error.message : error);
     res.json({
       suggestion: 'Unable to generate budget right now.',
       success: false,
@@ -600,8 +600,8 @@ router.get('/insights', authenticate, asyncHandler(async (req: AuthRequest, res:
     }
 
     res.json({ insight: savedInsight, content: result.insights, success: true });
-  } catch (error: any) {
-    console.error('❌ [Insights] Error:', error.message || error);
+  } catch (error: unknown) {
+    console.error('❌ [Insights] Error:', error instanceof Error ? error.message : error);
     res.json({
       content: 'Unable to generate financial insights right now.',
       success: false,
@@ -619,8 +619,8 @@ router.get('/insights/history', authenticate, asyncHandler(async (req: AuthReque
       take: 20,
     });
     res.json({ insights });
-  } catch (error: any) {
-    console.error('❌ [Insights/History] Error:', error.message || error);
+  } catch (error: unknown) {
+    console.error('❌ [Insights/History] Error:', error instanceof Error ? error.message : error);
     res.json({ insights: [] });
   }
 }));

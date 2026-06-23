@@ -5,16 +5,20 @@ import { AuthRequest } from '../types';
 import { sendEmail } from '../services/email';
 import { config } from '../config';
 import { asyncHandler } from '../utils/asyncHandler';
+import { Prisma } from '@prisma/client';
 
 const router = Router();
 
 // ─── Get Notifications ─────────────────────────────────────────
 router.get('/', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { page = '1', limit = '20', unreadOnly } = req.query;
-  const pageNum = parseInt(page as string);
-  const limitNum = parseInt(limit as string);
+  const page = String(Array.isArray(req.query.page) ? req.query.page[0] : req.query.page ?? '1');
+  const limit = String(Array.isArray(req.query.limit) ? req.query.limit[0] : req.query.limit ?? '20');
+  const rawUnreadOnly = req.query.unreadOnly;
+  const unreadOnly = typeof rawUnreadOnly === 'string' ? rawUnreadOnly : Array.isArray(rawUnreadOnly) ? String(rawUnreadOnly[0]) : undefined;
+  const pageNum = parseInt(page);
+  const limitNum = parseInt(limit);
 
-  const where: any = { userId: req.user!.id };
+  const where: Prisma.NotificationWhereInput = { userId: req.user!.id };
   if (unreadOnly === 'true') where.read = false;
 
   const [notifications, total, unreadCount] = await Promise.all([
@@ -42,7 +46,8 @@ router.get('/', authenticate, asyncHandler(async (req: AuthRequest, res: Respons
 
 // ─── Mark as Read ──────────────────────────────────────────────
 router.patch('/:id/read', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { id } = req.params;
+  const rawId = req.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
   await prisma.notification.updateMany({
     where: { id, userId: req.user!.id },
     data: { read: true },
@@ -61,7 +66,8 @@ router.patch('/read-all', authenticate, asyncHandler(async (req: AuthRequest, re
 
 // ─── Delete Notification ───────────────────────────────────────
 router.delete('/:id', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { id } = req.params;
+  const rawId = req.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
   await prisma.notification.deleteMany({
     where: { id, userId: req.user!.id },
   });

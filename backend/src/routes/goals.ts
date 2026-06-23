@@ -69,7 +69,8 @@ router.post('/', authenticate, asyncHandler(async (req: AuthRequest, res: Respon
 
 // ─── Update Goal ───────────────────────────────────────────────
 router.put('/:id', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { id } = req.params;
+  const rawId = req.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const body = savingsGoalSchema.partial().parse(req.body);
 
   const goal = await prisma.savingsGoal.findFirst({ where: { id, userId: req.user!.id } });
@@ -85,7 +86,8 @@ router.put('/:id', authenticate, asyncHandler(async (req: AuthRequest, res: Resp
 
 // ─── Add Funds to Goal ─────────────────────────────────────────
 router.post('/:id/add-funds', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { id } = req.params;
+  const rawId = req.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const { amount } = req.body;
 
   if (!amount || amount <= 0) {
@@ -108,7 +110,8 @@ router.post('/:id/add-funds', authenticate, asyncHandler(async (req: AuthRequest
 
 // ─── Get AI Prediction ─────────────────────────────────────────
 router.get('/:id/predict', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { id } = req.params;
+  const rawId = req.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
 
   const goal = await prisma.savingsGoal.findFirst({ where: { id, userId: req.user!.id } });
   if (!goal) throw new AppError(404, 'Goal not found');
@@ -136,8 +139,9 @@ router.get('/:id/predict', authenticate, asyncHandler(async (req: AuthRequest, r
   );
 
   if (result.error) {
-    res.status(502).json({
+    res.json({
       prediction: result.prediction,
+      success: false,
       error: {
         type: result.error.type,
         message: result.error.userMessage,
@@ -148,12 +152,13 @@ router.get('/:id/predict', authenticate, asyncHandler(async (req: AuthRequest, r
     return;
   }
 
-  res.json({ prediction: result.prediction });
+  res.json({ prediction: result.prediction, success: true });
 }));
 
 // ─── Delete Goal ───────────────────────────────────────────────
 router.delete('/:id', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { id } = req.params;
+  const rawId = req.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const goal = await prisma.savingsGoal.findFirst({ where: { id, userId: req.user!.id } });
   if (!goal) throw new AppError(404, 'Goal not found');
 

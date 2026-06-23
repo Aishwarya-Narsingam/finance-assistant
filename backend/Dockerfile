@@ -18,4 +18,4 @@ COPY --from=builder /app/package.json ./package.json
 EXPOSE 5000
 ENV NODE_ENV=production
 
-CMD ["npx", "prisma", "migrate", "deploy", "&&", "node", "dist/index.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/index.js"]

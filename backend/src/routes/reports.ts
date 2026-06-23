@@ -9,9 +9,10 @@ const router = Router();
 
 // ─── Get Reports ───────────────────────────────────────────────
 router.get('/', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { page = '1', limit = '10' } = req.query;
-  const pageNum = parseInt(page as string);
-  const limitNum = parseInt(limit as string);
+  const page = String(Array.isArray(req.query.page) ? req.query.page[0] : req.query.page ?? '1');
+  const limit = String(Array.isArray(req.query.limit) ? req.query.limit[0] : req.query.limit ?? '10');
+  const pageNum = parseInt(page);
+  const limitNum = parseInt(limit);
 
   const [reports, total] = await Promise.all([
     prisma.report.findMany({
@@ -104,7 +105,8 @@ router.post('/generate', authenticate, asyncHandler(async (req: AuthRequest, res
 
 // ─── Get Single Report ─────────────────────────────────────────
 router.get('/:id', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { id } = req.params;
+  const rawId = req.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const report = await prisma.report.findFirst({
     where: { id, userId: req.user!.id },
   });
@@ -114,7 +116,8 @@ router.get('/:id', authenticate, asyncHandler(async (req: AuthRequest, res: Resp
 
 // ─── Delete Report ─────────────────────────────────────────────
 router.delete('/:id', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { id } = req.params;
+  const rawId = req.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const report = await prisma.report.findFirst({
     where: { id, userId: req.user!.id },
   });

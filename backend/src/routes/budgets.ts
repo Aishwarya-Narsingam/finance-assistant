@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import prisma from '../config/prisma';
 import { authenticate } from '../middleware/auth';
-import { AuthRequest, BudgetQuery } from '../types';
+import { AuthRequest } from '../types';
 import { budgetSchema } from '../utils/validators';
 import { asyncHandler } from '../utils/asyncHandler';
 
@@ -9,7 +9,10 @@ const router = Router();
 
 // ─── Get Budgets ───────────────────────────────────────────────
 router.get('/', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { month, year } = req.query as BudgetQuery;
+  const rawMonth = req.query.month;
+  const rawYear = req.query.year;
+  const month = typeof rawMonth === 'string' ? rawMonth : Array.isArray(rawMonth) ? String(rawMonth[0]) : undefined;
+  const year = typeof rawYear === 'string' ? rawYear : Array.isArray(rawYear) ? String(rawYear[0]) : undefined;
   const now = new Date();
   const m = parseInt(month || String(now.getMonth() + 1));
   const y = parseInt(year || String(now.getFullYear()));
@@ -75,7 +78,8 @@ router.post('/', authenticate, asyncHandler(async (req: AuthRequest, res: Respon
 
 // ─── Update Budget ─────────────────────────────────────────────
 router.put('/:id', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { id } = req.params;
+  const rawId = req.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const { amount, name } = req.body;
 
   const budget = await prisma.budget.findFirst({ where: { id, userId: req.user!.id } });
@@ -93,7 +97,8 @@ router.put('/:id', authenticate, asyncHandler(async (req: AuthRequest, res: Resp
 
 // ─── Delete Budget ─────────────────────────────────────────────
 router.delete('/:id', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { id } = req.params;
+  const rawId = req.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
 
   const budget = await prisma.budget.findFirst({ where: { id, userId: req.user!.id } });
   if (!budget) {

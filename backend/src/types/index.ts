@@ -39,13 +39,22 @@ export interface BudgetQuery {
   year?: string;
 }
 
+export interface TransactionSummary {
+  id: string;
+  amount: number;
+  type: string;
+  category: string;
+  description: string | null;
+  date: Date;
+}
+
 export interface DashboardStats {
   totalBalance: number;
   monthlyIncome: number;
   monthlyExpenses: number;
   totalSavings: number;
   activeGoals: number;
-  recentTransactions: any[];
+  recentTransactions: TransactionSummary[];
   expenseByCategory: { name: string; value: number }[];
   monthlyTrends: { month: string; income: number; expenses: number }[];
 }

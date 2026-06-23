@@ -1,7 +1,8 @@
 import prisma from '../config/prisma';
+import { Category } from '@prisma/client';
 
 // ─── Debug logger ──────────────────────────────────────────────
-function logQuery(name: string, userId: string, startTime: number, result?: any) {
+function logQuery<T>(name: string, userId: string, startTime: number, result: T): T {
   const elapsed = Date.now() - startTime;
   console.log(`💾 [FinanceQuery] ${name} | userId=${userId.slice(0, 8)}... | ${elapsed}ms`);
   if (elapsed > 500) {
@@ -72,7 +73,7 @@ export async function getCategorySpending(userId: string, category: string): Pro
     where: {
       userId,
       type: 'EXPENSE',
-      category: category as any,
+      category: category as Category,
       date: { gte: startOfMonth },
     },
     _sum: { amount: true },
@@ -397,7 +398,7 @@ export async function buildFinancialContext(userId: string): Promise<string> {
 export function formatQuickResponse(
   intent: string,
   value: number,
-  extra?: Record<string, any>
+  extra?: { category?: string; remaining?: number; totalBudget?: number }
 ): string {
   const fmt = (v: number) =>
     `₹${v.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;

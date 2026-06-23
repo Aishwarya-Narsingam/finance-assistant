@@ -37,4 +37,15 @@ export const config = {
   database: {
     url: process.env.DATABASE_URL || '',
   },
+
+  // ─── Cookie settings for cross-origin Vercel↔Render ─────────
+  cookie: {
+    // In production, Vercel (frontend) and Render (backend) are on different
+    // origins, so sameSite must be 'none' with secure=true for cookies to
+    // be sent cross-origin. In development, 'lax' is fine.
+    sameSite: (process.env.NODE_ENV === 'production' ? 'none' : 'lax') as 'none' | 'lax' | 'strict',
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+  },
 } as const;

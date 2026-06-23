@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config';
+import type { Transaction, Budget, SavingsGoal } from '@prisma/client';
 
 // ─── Configuration ─────────────────────────────────────────────
 // Use a valid Gemini model. Common options:
@@ -103,19 +104,20 @@ export interface GeminiErrorResponse {
 }
 
 // ─── Error Classification ──────────────────────────────────────
-function classifyGeminiError(error: any): GeminiErrorResponse['error'] {
-  const msg = String(error?.message ?? error ?? '');
-  const code = String(error?.code ?? error?.status ?? '');
-  const status = Number(error?.statusCode ?? error?.httpStatusCode ?? error?.response?.status ?? 0);
+function classifyGeminiError(error: unknown): GeminiErrorResponse['error'] {
+  const errObj = error as Record<string, unknown> | null | undefined;
+  const msg = String(errObj?.message ?? errObj ?? '');
+  const code = String(errObj?.code ?? errObj?.status ?? '');
+  const status = Number(errObj?.statusCode ?? errObj?.httpStatusCode ?? (errObj?.response as Record<string, unknown>)?.status ?? 0);
 
   console.error('❌ [Gemini] Full error object:', {
     message: msg,
     statusCode: status,
     apiCode: code,
-    name: error?.name,
-    stack: error?.stack?.split('\n').slice(0, 5),
-    details: error?.details,
-    response: error?.response,
+    name: (errObj as Record<string, unknown>)?.name,
+    stack: typeof (errObj as Record<string, unknown>)?.stack === 'string' ? ((errObj as Record<string, unknown>).stack as string).split('\n').slice(0, 5) : undefined,
+    details: (errObj as Record<string, unknown>)?.details,
+    response: (errObj as Record<string, unknown>)?.response,
   });
 
   // API key issues
@@ -241,7 +243,7 @@ function classifyGeminiError(error: any): GeminiErrorResponse['error'] {
       'Please try again in a few moments.',
     statusCode: status || 500,
     apiCode: code || 'UNKNOWN',
-    details: typeof error?.details === 'string' ? error.details : undefined,
+    details: typeof (errObj as Record<string, unknown>)?.details === 'string' ? (errObj as Record<string, unknown>).details as string : undefined,
     retryable: true,
   };
 }
@@ -303,8 +305,8 @@ export async function getGeminiHealthStatus(): Promise<GeminiHealthStatus> {
 
     console.warn('⚠️  [Health Check] Gemini returned empty response');
     return { ...base, status: 'error', error: 'Gemini returned an empty response' };
-  } catch (err: any) {
-    console.error('❌ [Health Check] Gemini connection failed:', err?.message || err);
+  } catch (err: unknown) {
+    console.error('❌ [Health Check] Gemini connection failed:', err instanceof Error ? err.message : err);
     const classified = classifyGeminiError(err);
     return {
       ...base,
@@ -340,7 +342,7 @@ export async function testGeminiApiKey(): Promise<{
       return { success: true, message: `API key valid. Response: "${text.trim()}"`, responseTimeMs: elapsed };
     }
     return { success: false, message: 'API key accepted but model returned empty response.', responseTimeMs: elapsed };
-  } catch (err: any) {
+  } catch (err: unknown) {
     const elapsed = Date.now() - start;
     const classified = classifyGeminiError(err);
     return {
@@ -392,7 +394,7 @@ export async function generateChatResponse(
 
     console.log('✅ [Chat] Gemini response generated successfully');
     return { response: text };
-  } catch (error: any) {
+  } catch (error: unknown) {
     const classified = classifyGeminiError(error);
 
     console.error('❌ [Chat] Gemini API error:', JSON.stringify(classified, null, 2));
@@ -431,7 +433,7 @@ export async function generateAIChatResponse(
 
     console.log('✅ [AI] Gemini response generated successfully');
     return { response: text };
-  } catch (error: any) {
+  } catch (error: unknown) {
     const classified = classifyGeminiError(error);
     console.error('❌ [AI] Gemini API error:', JSON.stringify(classified, null, 2));
     return { response: '', error: classified };
@@ -466,7 +468,7 @@ export async function generateBudgetSuggestion(
 
     console.log('✅ [Budget] Gemini budget suggestion generated');
     return { suggestion: text };
-  } catch (error: any) {
+  } catch (error: unknown) {
     const classified = classifyGeminiError(error);
     console.error('❌ [Budget] Gemini API error:', JSON.stringify(classified, null, 2));
     return { suggestion: '', error: classified };
@@ -515,7 +517,7 @@ export async function generateSavingsPrediction(
 
     console.log('✅ [Savings] Gemini savings prediction generated');
     return { prediction: text };
-  } catch (error: any) {
+  } catch (error: unknown) {
     const classified = classifyGeminiError(error);
     console.error('❌ [Savings] Gemini API error:', JSON.stringify(classified, null, 2));
     return { prediction: fallbackPrediction, error: classified };
@@ -524,12 +526,12 @@ export async function generateSavingsPrediction(
 
 // ─── Generate Financial Insights ───────────────────────────────
 export async function generateFinancialInsights(
-  transactions: any[],
-  budgets: any[],
-  goals: any[]
+  transactions: Transaction[],
+  budgets: Budget[],
+  goals: SavingsGoal[]
 ): Promise<{ insights: string; error?: GeminiErrorResponse['error'] }> {
-  const totalIncome = transactions.filter((t: any) => t.type === 'INCOME').reduce((s: number, t: any) => s + t.amount, 0);
-  const totalExpenses = transactions.filter((t: any) => t.type === 'EXPENSE').reduce((s: number, t: any) => s + t.amount, 0);
+  const totalIncome = transactions.filter((t) => t.type === 'INCOME').reduce((s, t) => s + t.amount, 0);
+  const totalExpenses = transactions.filter((t) => t.type === 'EXPENSE').reduce((s, t) => s + t.amount, 0);
   const savingsRate = totalIncome > 0 ? ((totalIncome - totalExpenses) / totalIncome * 100).toFixed(1) : 'N/A';
 
   const fallbackInsights = `**Financial Health Summary**\n\n📊 **Overview**\n- Total Income (30 days): ₹${totalIncome.toLocaleString('en-IN')}\n- Total Expenses (30 days): ₹${totalExpenses.toLocaleString('en-IN')}\n- Savings Rate: ${savingsRate}%\n- Active Budgets: ${budgets.length}\n- Active Goals: ${goals.length}\n\n💡 **Recommendations**\n1. ${savingsRate !== 'N/A' && parseFloat(savingsRate as string) < 20 ? 'Try to increase your savings rate to at least 20% of your income' : 'Your savings rate looks healthy! Consider investing the surplus'}\n2. ${budgets.length === 0 ? 'Create budgets in the Budget section to better track your spending' : 'Review your budget categories to ensure they align with your spending patterns'}\n3. ${goals.length === 0 ? "Set up savings goals to track what you're saving for" : 'Keep tracking your goals regularly to stay motivated'}\n\nAdd more transactions and budgets for more detailed, personalized insights!`;
@@ -554,7 +556,7 @@ export async function generateFinancialInsights(
 
     console.log('✅ [Insights] Gemini financial insights generated');
     return { insights: text };
-  } catch (error: any) {
+  } catch (error: unknown) {
     const classified = classifyGeminiError(error);
     console.error('❌ [Insights] Gemini API error:', JSON.stringify(classified, null, 2));
     return { insights: fallbackInsights, error: classified };

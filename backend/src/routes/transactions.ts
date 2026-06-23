@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import prisma from '../config/prisma';
 import { authenticate } from '../middleware/auth';
 import { AppError } from '../middleware/error';
-import { AuthRequest, TransactionQuery } from '../types';
+import { AuthRequest } from '../types';
 import { transactionSchema } from '../utils/validators';
 import { Prisma, Category, TransactionType } from '@prisma/client';
 import { asyncHandler } from '../utils/asyncHandler';
@@ -11,10 +11,21 @@ const router = Router();
 
 // ─── Get All Transactions ──────────────────────────────────────
 router.get('/', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const {
-    page = '1', limit = '20', search, sortBy = 'date',
-    sortOrder = 'desc', type, category, startDate, endDate,
-  } = req.query as TransactionQuery;
+  const page = String(Array.isArray(req.query.page) ? req.query.page[0] : req.query.page ?? '1');
+  const limit = String(Array.isArray(req.query.limit) ? req.query.limit[0] : req.query.limit ?? '20');
+  const rawSearch = req.query.search;
+  const search = typeof rawSearch === 'string' ? rawSearch : Array.isArray(rawSearch) ? String(rawSearch[0]) : undefined;
+  const sortBy = String(Array.isArray(req.query.sortBy) ? req.query.sortBy[0] : req.query.sortBy ?? 'date');
+  const rawSortOrder = req.query.sortOrder;
+  const sortOrder = typeof rawSortOrder === 'string' ? rawSortOrder : Array.isArray(rawSortOrder) ? String(rawSortOrder[0]) : 'desc';
+  const rawType = req.query.type;
+  const type = typeof rawType === 'string' ? rawType : Array.isArray(rawType) ? String(rawType[0]) : undefined;
+  const rawCategory = req.query.category;
+  const category = typeof rawCategory === 'string' ? rawCategory : Array.isArray(rawCategory) ? String(rawCategory[0]) : undefined;
+  const rawStartDate = req.query.startDate;
+  const startDate = typeof rawStartDate === 'string' ? rawStartDate : Array.isArray(rawStartDate) ? String(rawStartDate[0]) : undefined;
+  const rawEndDate = req.query.endDate;
+  const endDate = typeof rawEndDate === 'string' ? rawEndDate : Array.isArray(rawEndDate) ? String(rawEndDate[0]) : undefined;
 
   const pageNum = parseInt(page);
   const limitNum = parseInt(limit);
@@ -41,7 +52,7 @@ router.get('/', authenticate, asyncHandler(async (req: AuthRequest, res: Respons
       where,
       skip,
       take: limitNum,
-      orderBy: { [sortBy]: sortOrder },
+      orderBy: { [sortBy]: sortOrder as Prisma.SortOrder },
     }),
     prisma.transaction.count({ where }),
   ]);
@@ -190,7 +201,8 @@ router.post('/', authenticate, asyncHandler(async (req: AuthRequest, res: Respon
 
 // ─── Update Transaction ────────────────────────────────────────
 router.put('/:id', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { id } = req.params;
+  const rawId = req.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const body = transactionSchema.partial().parse(req.body);
 
   const existing = await prisma.transaction.findFirst({
@@ -208,7 +220,8 @@ router.put('/:id', authenticate, asyncHandler(async (req: AuthRequest, res: Resp
 
 // ─── Delete Transaction ────────────────────────────────────────
 router.delete('/:id', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { id } = req.params;
+  const rawId = req.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
 
   const existing = await prisma.transaction.findFirst({
     where: { id, userId: req.user!.id },

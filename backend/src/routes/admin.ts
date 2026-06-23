@@ -3,6 +3,7 @@ import prisma from '../config/prisma';
 import { authenticate, requireAdmin } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { asyncHandler } from '../utils/asyncHandler';
+import { Prisma } from '@prisma/client';
 
 const router = Router();
 
@@ -62,15 +63,18 @@ router.get('/dashboard', asyncHandler(async (req: AuthRequest, res: Response) =>
 
 // ─── Get All Users ─────────────────────────────────────────────
 router.get('/users', asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { page = '1', limit = '20', search } = req.query;
-  const pageNum = parseInt(page as string);
-  const limitNum = parseInt(limit as string);
+  const page = String(Array.isArray(req.query.page) ? req.query.page[0] : req.query.page ?? '1');
+  const limit = String(Array.isArray(req.query.limit) ? req.query.limit[0] : req.query.limit ?? '20');
+  const rawSearch = req.query.search;
+  const search = typeof rawSearch === 'string' ? rawSearch : Array.isArray(rawSearch) ? String(rawSearch[0]) : undefined;
+  const pageNum = parseInt(page);
+  const limitNum = parseInt(limit);
 
-  const where: any = {};
+  const where: Prisma.UserWhereInput = {};
   if (search) {
     where.OR = [
-      { name: { contains: search as string, mode: 'insensitive' } },
-      { email: { contains: search as string, mode: 'insensitive' } },
+      { name: { contains: search, mode: 'insensitive' } },
+      { email: { contains: search, mode: 'insensitive' } },
     ];
   }
 
@@ -100,7 +104,8 @@ router.get('/users', asyncHandler(async (req: AuthRequest, res: Response) => {
 
 // ─── Update User Role ──────────────────────────────────────────
 router.patch('/users/:id/role', asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { id } = req.params;
+  const rawId = req.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const { role } = req.body;
 
   const user = await prisma.user.update({
@@ -114,16 +119,18 @@ router.patch('/users/:id/role', asyncHandler(async (req: AuthRequest, res: Respo
 
 // ─── Delete User ───────────────────────────────────────────────
 router.delete('/users/:id', asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { id } = req.params;
+  const rawId = req.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
   await prisma.user.delete({ where: { id } });
   res.json({ message: 'User deleted successfully' });
 }));
 
 // ─── Get All Transactions (Admin) ──────────────────────────────
 router.get('/transactions', asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { page = '1', limit = '20' } = req.query;
-  const pageNum = parseInt(page as string);
-  const limitNum = parseInt(limit as string);
+  const page = String(Array.isArray(req.query.page) ? req.query.page[0] : req.query.page ?? '1');
+  const limit = String(Array.isArray(req.query.limit) ? req.query.limit[0] : req.query.limit ?? '20');
+  const pageNum = parseInt(page);
+  const limitNum = parseInt(limit);
 
   const [transactions, total] = await Promise.all([
     prisma.transaction.findMany({
@@ -165,9 +172,10 @@ router.get('/ai-usage', asyncHandler(async (req: AuthRequest, res: Response) => 
 
 // ─── Get Audit Logs ────────────────────────────────────────────
 router.get('/audit-logs', asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { page = '1', limit = '50' } = req.query;
-  const pageNum = parseInt(page as string);
-  const limitNum = parseInt(limit as string);
+  const page = String(Array.isArray(req.query.page) ? req.query.page[0] : req.query.page ?? '1');
+  const limit = String(Array.isArray(req.query.limit) ? req.query.limit[0] : req.query.limit ?? '50');
+  const pageNum = parseInt(page);
+  const limitNum = parseInt(limit);
 
   const [logs, total] = await Promise.all([
     prisma.auditLog.findMany({

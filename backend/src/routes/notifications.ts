@@ -1,186 +1,169 @@
 import { Router, Response } from 'express';
-import prisma from '../config/prisma';
+import { prisma } from '../config/prisma';
+import { asyncHandler } from '../utils/asyncHandler';
+import { AppError } from '../middleware/error';
 import { authenticate } from '../middleware/auth';
 import { AuthRequest } from '../types';
-import { sendEmail } from '../services/email';
-import { config } from '../config';
-import { asyncHandler } from '../utils/asyncHandler';
-import { Prisma } from '@prisma/client';
+import { sendWeeklyReportEmail } from '../services/email';
 
 const router = Router();
 
-// ─── Get Notifications ─────────────────────────────────────────
+// GET /notifications
 router.get('/', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const page = String(Array.isArray(req.query.page) ? req.query.page[0] : req.query.page ?? '1');
-  const limit = String(Array.isArray(req.query.limit) ? req.query.limit[0] : req.query.limit ?? '20');
-  const rawUnreadOnly = req.query.unreadOnly;
-  const unreadOnly = typeof rawUnreadOnly === 'string' ? rawUnreadOnly : Array.isArray(rawUnreadOnly) ? String(rawUnreadOnly[0]) : undefined;
-  const pageNum = parseInt(page);
-  const limitNum = parseInt(limit);
+  const userId = req.user!.id;
+  const { read } = req.query;
 
-  const where: Prisma.NotificationWhereInput = { userId: req.user!.id };
-  if (unreadOnly === 'true') where.read = false;
+  const where: any = { userId };
+  if (read === 'true') where.read = true;
+  else if (read === 'false') where.read = false;
 
-  const [notifications, total, unreadCount] = await Promise.all([
-    prisma.notification.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      skip: (pageNum - 1) * limitNum,
-      take: limitNum,
-    }),
-    prisma.notification.count({ where }),
-    prisma.notification.count({ where: { userId: req.user!.id, read: false } }),
-  ]);
-
-  res.json({
-    notifications,
-    unreadCount,
-    pagination: {
-      page: pageNum,
-      limit: limitNum,
-      total,
-      totalPages: Math.ceil(total / limitNum),
-    },
+  const notifications = await prisma.notification.findMany({
+    where,
+    orderBy: { createdAt: 'desc' },
+    take: 50,
   });
+
+  const unreadCount = await prisma.notification.count({
+    where: { userId, read: false },
+  });
+
+  res.json({ success: true, data: { notifications, unreadCount } });
 }));
 
-// ─── Mark as Read ──────────────────────────────────────────────
+// PATCH /notifications/:id/read
 router.patch('/:id/read', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const rawId = req.params.id;
-  const id = Array.isArray(rawId) ? rawId[0] : rawId;
-  await prisma.notification.updateMany({
-    where: { id, userId: req.user!.id },
-    data: { read: true },
-  });
-  res.json({ message: 'Notification marked as read' });
+  const userId = req.user!.id;
+  const { id } = req.params;
+
+  const notification = await prisma.notification.findFirst({ where: { id, userId } });
+  if (!notification) throw new AppError(404, 'Notification not found');
+
+  await prisma.notification.update({ where: { id }, data: { read: true } });
+  res.json({ success: true, message: 'Notification marked as read' });
 }));
 
-// ─── Mark All as Read ──────────────────────────────────────────
+// PATCH /notifications/read-all
 router.patch('/read-all', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
+  const userId = req.user!.id;
   await prisma.notification.updateMany({
-    where: { userId: req.user!.id, read: false },
+    where: { userId, read: false },
     data: { read: true },
   });
-  res.json({ message: 'All notifications marked as read' });
+  res.json({ success: true, message: 'All notifications marked as read' });
 }));
 
-// ─── Delete Notification ───────────────────────────────────────
+// DELETE /notifications/:id
 router.delete('/:id', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const rawId = req.params.id;
-  const id = Array.isArray(rawId) ? rawId[0] : rawId;
-  await prisma.notification.deleteMany({
-    where: { id, userId: req.user!.id },
-  });
-  res.json({ message: 'Notification deleted' });
+  const userId = req.user!.id;
+  const { id } = req.params;
+
+  const notification = await prisma.notification.findFirst({ where: { id, userId } });
+  if (!notification) throw new AppError(404, 'Notification not found');
+
+  await prisma.notification.delete({ where: { id } });
+  res.json({ success: true, message: 'Notification deleted' });
 }));
 
-// ─── Check Budget Alerts ───────────────────────────────────────
+// GET /notifications/check-budgets
 router.get('/check-budgets', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
+  const userId = req.user!.id;
   const now = new Date();
-  const budgets = await prisma.budget.findMany({
-    where: { userId: req.user!.id, month: now.getMonth() + 1, year: now.getFullYear() },
-  });
+  const month = now.getMonth() + 1;
+  const year = now.getFullYear();
+
+  const budgets = await prisma.budget.findMany({ where: { userId, month, year } });
+  const created: string[] = [];
 
   for (const budget of budgets) {
-    const percentage = budget.amount > 0 ? (budget.spent / budget.amount) * 100 : 0;
+    if (budget.amount === 0) continue;
+    const percentage = (budget.spent / budget.amount) * 100;
 
     if (percentage >= 100) {
-      // Overspending alert
-      const existing = await prisma.notification.findMany({
-        where: {
-          userId: req.user!.id,
-          type: 'OVERSPENDING',
-        },
-        take: 1,
+      const existing = await prisma.notification.findFirst({
+        where: { userId, type: 'OVERSPENDING', title: { contains: budget.name } },
       });
-
-      const hasAlert = existing.some((n) => n.message.includes(budget.name));
-
-      if (!hasAlert) {
+      if (!existing) {
         await prisma.notification.create({
           data: {
-            title: 'Overspending Alert',
-            message: `You've exceeded your ${budget.name} budget by ₹${Math.round(budget.spent - budget.amount)}. Consider reducing spending in this category.`,
             type: 'OVERSPENDING',
-            userId: req.user!.id,
+            title: `Budget exceeded: ${budget.name}`,
+            message: `You've exceeded your ${budget.name} budget of ₹${budget.amount.toLocaleString()}. Current spending: ₹${budget.spent.toLocaleString()}`,
+            userId,
           },
         });
+        created.push(`overspend:${budget.name}`);
       }
     } else if (percentage >= 80) {
-      const existing = await prisma.notification.findMany({
-        where: {
-          userId: req.user!.id,
-          type: 'BUDGET_ALERT',
-        },
-        take: 1,
+      const existing = await prisma.notification.findFirst({
+        where: { userId, type: 'BUDGET_ALERT', title: { contains: budget.name } },
       });
-
-      const hasAlert = existing.some((n) => n.message.includes(budget.name));
-
-      if (!hasAlert) {
+      if (!existing) {
         await prisma.notification.create({
           data: {
-            title: 'Budget Alert',
-            message: `You've used ${Math.round(percentage)}% of your ${budget.name} budget. ₹${Math.round(budget.amount - budget.spent)} remaining.`,
             type: 'BUDGET_ALERT',
-            userId: req.user!.id,
+            title: `Budget alert: ${budget.name}`,
+            message: `You've used ${percentage.toFixed(0)}% of your ${budget.name} budget (₹${budget.spent.toLocaleString()} / ₹${budget.amount.toLocaleString()}).`,
+            userId,
           },
         });
+        created.push(`alert:${budget.name}`);
       }
     }
   }
 
-  res.json({ message: 'Budget check complete' });
+  res.json({ success: true, data: { created, count: created.length } });
 }));
 
-// ─── Send Weekly Report Email ──────────────────────────────────
+// POST /notifications/send-weekly-report
 router.post('/send-weekly-report', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
-  if (!user) return;
+  const userId = req.user!.id;
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new AppError(404, 'User not found');
 
   const now = new Date();
-  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const weekAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
 
-  const [income, expenses] = await Promise.all([
-    prisma.transaction.aggregate({
-      where: { userId: req.user!.id, type: 'INCOME', date: { gte: weekAgo, lte: now } },
-      _sum: { amount: true },
-    }),
-    prisma.transaction.aggregate({
-      where: { userId: req.user!.id, type: 'EXPENSE', date: { gte: weekAgo, lte: now } },
-      _sum: { amount: true },
-    }),
-  ]);
+  const transactions = await prisma.transaction.findMany({
+    where: { userId, date: { gte: weekAgo } },
+  });
 
-  const html = `
-    <div style="font-family: Inter, sans-serif; padding: 40px; max-width: 480px; margin: 0 auto;">
-      <h1 style="font-size: 24px; margin-bottom: 16px;">Weekly Financial Report</h1>
-      <p style="color: #6B7280;">Hi ${user.name}, here's your weekly summary:</p>
-      <div style="background: #FAFAFA; border-radius: 12px; padding: 24px; margin: 24px 0;">
-        <p><strong>Income:</strong> ₹${(income._sum.amount || 0).toLocaleString()}</p>
-        <p><strong>Expenses:</strong> ₹${(expenses._sum.amount || 0).toLocaleString()}</p>
-        <p><strong>Net Savings:</strong> ₹${((income._sum.amount || 0) - (expenses._sum.amount || 0)).toLocaleString()}</p>
+  const totalIncome = transactions.filter((t) => t.type === 'INCOME').reduce((s, t) => s + t.amount, 0);
+  const totalExpenses = transactions.filter((t) => t.type === 'EXPENSE').reduce((s, t) => s + t.amount, 0);
+  const savings = totalIncome - totalExpenses;
+
+  const reportHtml = `
+    <div style="margin: 16px 0;">
+      <div style="background: #f0fdf4; border-radius: 8px; padding: 16px; margin-bottom: 8px;">
+        <strong>Income:</strong> ₹${totalIncome.toLocaleString()}
       </div>
-      <a href="${config.frontendUrl}/dashboard" style="display: inline-block; background: #000; color: #fff; padding: 12px 24px; border-radius: 8px; text-decoration: none;">View Dashboard</a>
+      <div style="background: #fef2f2; border-radius: 8px; padding: 16px; margin-bottom: 8px;">
+        <strong>Expenses:</strong> ₹${totalExpenses.toLocaleString()}
+      </div>
+      <div style="background: #f0f0ff; border-radius: 8px; padding: 16px; margin-bottom: 8px;">
+        <strong>Net Savings:</strong> ₹${savings.toLocaleString()}
+      </div>
+      <p style="color: #6b7280; font-size: 14px; margin-top: 16px;">
+        View your full report in the FinanceAI dashboard.
+      </p>
     </div>
   `;
 
-  await sendEmail({
-    to: user.email,
-    subject: 'Your Weekly Financial Report - FinanceAI',
-    html,
-  });
+  // Send email
+  if (user.email) {
+    sendWeeklyReportEmail(user.email, user.name, reportHtml);
+  }
 
+  // Create notification
   await prisma.notification.create({
     data: {
-      title: 'Weekly Report Sent',
-      message: 'Your weekly financial report has been sent to your email.',
       type: 'WEEKLY_REPORT',
-      userId: req.user!.id,
+      title: 'Weekly Report Available',
+      message: `Your weekly financial report is ready. Income: ₹${totalIncome.toLocaleString()}, Expenses: ₹${totalExpenses.toLocaleString()}, Savings: ₹${savings.toLocaleString()}`,
+      userId,
     },
   });
 
-  res.json({ message: 'Weekly report sent successfully' });
+  res.json({ success: true, message: 'Weekly report sent' });
 }));
 
 export default router;

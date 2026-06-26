@@ -1,112 +1,83 @@
 import { Router, Response } from 'express';
-import prisma from '../config/prisma';
-import { authenticate } from '../middleware/auth';
-import { AuthRequest } from '../types';
-import { budgetSchema } from '../utils/validators';
+import { prisma } from '../config/prisma';
 import { asyncHandler } from '../utils/asyncHandler';
+import { AppError } from '../middleware/error';
+import { authenticate } from '../middleware/auth';
+import { budgetSchema, budgetUpdateSchema } from '../utils/validators';
+import { AuthRequest } from '../types';
 
 const router = Router();
 
-// ─── Get Budgets ───────────────────────────────────────────────
+// GET /budgets
 router.get('/', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const rawMonth = req.query.month;
-  const rawYear = req.query.year;
-  const month = typeof rawMonth === 'string' ? rawMonth : Array.isArray(rawMonth) ? String(rawMonth[0]) : undefined;
-  const year = typeof rawYear === 'string' ? rawYear : Array.isArray(rawYear) ? String(rawYear[0]) : undefined;
+  const userId = req.user!.id;
   const now = new Date();
-  const m = parseInt(month || String(now.getMonth() + 1));
-  const y = parseInt(year || String(now.getFullYear()));
+  const month = parseInt(String(req.query.month || now.getMonth() + 1), 10);
+  const year = parseInt(String(req.query.year || now.getFullYear()), 10);
 
   const budgets = await prisma.budget.findMany({
-    where: { userId: req.user!.id, month: m, year: y },
+    where: { userId, month, year },
     orderBy: { category: 'asc' },
   });
 
-  // Get actual spending per category
-  const startOfMonth = new Date(y, m - 1, 1);
-  const endOfMonth = new Date(y, m, 0);
-
-  const spending = await prisma.transaction.groupBy({
-    by: ['category'],
-    where: {
-      userId: req.user!.id,
-      type: 'EXPENSE',
-      date: { gte: startOfMonth, lte: endOfMonth },
-    },
-    _sum: { amount: true },
-  });
-
-  const spendingMap = new Map(spending.map((s) => [s.category, s._sum.amount || 0]));
-
-  const budgetsWithSpending = budgets.map((b) => ({
-    ...b,
-    spent: spendingMap.get(b.category) || 0,
-    percentage: spendingMap.get(b.category)
-      ? Math.round(((spendingMap.get(b.category) || 0) / b.amount) * 100)
-      : 0,
+  const budgetsWithPercentage = budgets.map((budget) => ({
+    ...budget,
+    spentPercentage: budget.amount > 0 ? Math.round((budget.spent / budget.amount) * 100 * 100) / 100 : 0,
+    remaining: Math.max(0, budget.amount - budget.spent),
+    isOverBudget: budget.spent > budget.amount,
   }));
 
-  res.json({ budgets: budgetsWithSpending, month: m, year: y });
+  res.json({ success: true, data: budgetsWithPercentage });
 }));
 
-// ─── Create Budget ─────────────────────────────────────────────
+// POST /budgets
 router.post('/', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const body = budgetSchema.parse(req.body);
+  const userId = req.user!.id;
+  const data = budgetSchema.parse(req.body);
 
   const budget = await prisma.budget.upsert({
     where: {
       userId_category_month_year: {
-        userId: req.user!.id,
-        category: body.category,
-        month: body.month,
-        year: body.year,
+        userId,
+        category: data.category,
+        month: data.month,
+        year: data.year,
       },
     },
-    update: { amount: body.amount, name: body.name },
-    create: {
-      name: body.name,
-      amount: body.amount,
-      category: body.category,
-      month: body.month,
-      year: body.year,
-      userId: req.user!.id,
-    },
+    update: { name: data.name, amount: data.amount },
+    create: { ...data, userId },
   });
 
-  res.status(201).json({ budget });
+  res.status(201).json({ success: true, data: budget, message: 'Budget saved' });
 }));
 
-// ─── Update Budget ─────────────────────────────────────────────
+// PUT /budgets/:id
 router.put('/:id', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const rawId = req.params.id;
-  const id = Array.isArray(rawId) ? rawId[0] : rawId;
-  const { amount, name } = req.body;
+  const userId = req.user!.id;
+  const { id } = req.params;
+  const data = budgetUpdateSchema.parse(req.body);
 
-  const budget = await prisma.budget.findFirst({ where: { id, userId: req.user!.id } });
-  if (!budget) {
-    return res.status(404).json({ error: 'Budget not found' });
-  }
+  const existing = await prisma.budget.findFirst({ where: { id, userId } });
+  if (!existing) throw new AppError(404, 'Budget not found');
 
-  const updated = await prisma.budget.update({
+  const budget = await prisma.budget.update({
     where: { id },
-    data: { ...(amount && { amount }), ...(name && { name }) },
+    data,
   });
 
-  res.json({ budget: updated });
+  res.json({ success: true, data: budget, message: 'Budget updated' });
 }));
 
-// ─── Delete Budget ─────────────────────────────────────────────
+// DELETE /budgets/:id
 router.delete('/:id', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const rawId = req.params.id;
-  const id = Array.isArray(rawId) ? rawId[0] : rawId;
+  const userId = req.user!.id;
+  const { id } = req.params;
 
-  const budget = await prisma.budget.findFirst({ where: { id, userId: req.user!.id } });
-  if (!budget) {
-    return res.status(404).json({ error: 'Budget not found' });
-  }
+  const existing = await prisma.budget.findFirst({ where: { id, userId } });
+  if (!existing) throw new AppError(404, 'Budget not found');
 
   await prisma.budget.delete({ where: { id } });
-  res.json({ message: 'Budget deleted successfully' });
+  res.json({ success: true, message: 'Budget deleted' });
 }));
 
 export default router;

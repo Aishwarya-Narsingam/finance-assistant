@@ -3,10 +3,13 @@ import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
+import path from 'path';
 import { config } from './config';
+import { prisma, verifyDbConnection } from './config/prisma';
 import { validateEnv } from './config/validateEnv';
-import { errorHandler, notFound } from './middleware/error';
-import prisma, { verifyDatabaseConnection } from './config/prisma';
+import { errorHandler } from './middleware/error';
+
+// Routes
 import authRoutes from './routes/auth';
 import userRoutes from './routes/users';
 import transactionRoutes from './routes/transactions';
@@ -17,95 +20,58 @@ import reportRoutes from './routes/reports';
 import notificationRoutes from './routes/notifications';
 import adminRoutes from './routes/admin';
 import uploadRoutes from './routes/upload';
-import { getGeminiHealthStatus } from './services/gemini';
-import { asyncHandler } from './utils/asyncHandler';
-import { v4 as uuidv4 } from 'uuid';
-
-// ─── Validate Environment on Startup ───────────────────────────
-validateEnv();
 
 const app = express();
 
-// ─── Request ID Middleware ─────────────────────────────────────
-app.use((_req, res, next) => {
-  res.setHeader('X-Request-Id', uuidv4());
-  next();
-});
+// Validate environment variables
+validateEnv();
 
-// ─── Security Middleware ───────────────────────────────────────
-app.use(helmet());
+// Security middleware
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  contentSecurityPolicy: false,
+}));
 
-// Support multiple CORS origins for Vercel preview deployments
-const allowedOrigins = config.frontendUrl
-  .split(',')
-  .map((url) => url.trim())
-  .filter(Boolean);
-
+// CORS
+const corsOrigins = config.frontendUrl.split(',').map((s) => s.trim());
 app.use(cors({
-  origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, curl, health checks)
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.some((allowed) => origin === allowed || origin.endsWith('.vercel.app'))) {
-      return callback(null, true);
-    }
-    callback(new Error('Not allowed by CORS'));
-  },
+  origin: corsOrigins,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-// ─── Rate Limiting ─────────────────────────────────────────────
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { success: false, error: 'Too many requests, please try again later.', message: 'Too many requests, please try again later.' },
-});
-app.use('/api/', limiter);
-
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  message: { success: false, error: 'Too many authentication attempts, please try again later.', message: 'Too many authentication attempts, please try again later.' },
-});
-app.use('/api/auth/login', authLimiter);
-app.use('/api/auth/register', authLimiter);
-
-// ─── Body Parsing ──────────────────────────────────────────────
+// Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// ─── Health Checks ────────────────────────────────────────────
-app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+// Rate limiting
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { success: false, error: 'Too many requests, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
-// AI-specific health check at /api/ai/health (no auth required)
-app.get('/api/ai/health', asyncHandler(async (_req, res) => {
-  const geminiStatus = await getGeminiHealthStatus();
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { success: false, error: 'Too many requests, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
-  let databaseConnected = false;
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    databaseConnected = true;
-  } catch {
-    databaseConnected = false;
-  }
+app.use('/api/', globalLimiter);
+app.use('/api/auth/', authLimiter);
 
-  const status = geminiStatus.status === 'connected' && databaseConnected ? 'healthy' : 'degraded';
+// Health check
+app.get('/api/health', (_req, res) => {
+  res.json({ success: true, data: { status: 'ok', timestamp: new Date().toISOString(), uptime: process.uptime() } });
+});
 
-  res.json({
-    status,
-    geminiConfigured: geminiStatus.geminiConfigured,
-    apiKeyLoaded: geminiStatus.apiKeyLoaded,
-    databaseConnected,
-  });
-}));
-
-// ─── API Routes ────────────────────────────────────────────────
+// Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/transactions', transactionRoutes);
@@ -117,72 +83,56 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/upload', uploadRoutes);
 
-// ─── Error Handling ────────────────────────────────────────────
-app.use(notFound);
-app.use(errorHandler);
-
-// ─── Start Server ──────────────────────────────────────────────
-const server = app.listen(config.port, async () => {
-  console.log(`🚀 FinanceAI Backend running on port ${config.port}`);
-  console.log(`📊 Environment: ${config.nodeEnv}`);
-  console.log(`🟢 Node.js ${process.version}`);
-
-  // ── Verify Database Connection ──────────────────────────────
-  await verifyDatabaseConnection();
-  
-  // ── Startup Audit (production-safe) ─────────────────────────
-  console.log('\n─── Service Status ─────────────────────────────────────');
-  const services = [
-    { name: 'GEMINI_API_KEY', loaded: config.gemini.apiKey.length > 0 },
-    { name: 'DATABASE_URL', loaded: config.database.url.length > 0 },
-    { name: 'JWT_SECRET', loaded: config.jwt.secret !== 'fallback-secret' },
-    { name: 'GOOGLE_CLIENT_ID', loaded: config.google.clientId.length > 0 },
-    { name: 'CLOUDINARY', loaded: config.cloudinary.cloudName.length > 0 },
-    { name: 'RESEND', loaded: config.resend.apiKey.length > 0 },
-  ];
-  for (const s of services) {
-    console.log(`  ${s.loaded ? '✅' : '⚠️ '} ${s.name}: ${s.loaded ? 'configured' : 'not configured'}`);
-  }
-  console.log('───────────────────────────────────────────────────────\n');
-});
-
-// ─── Graceful Shutdown ─────────────────────────────────────────
-async function gracefulShutdown(signal: string) {
-  console.log(`\n⚠️  ${signal} received. Starting graceful shutdown...`);
-
-  server.close(async () => {
-    console.log('📡 HTTP server closed.');
-    try {
-      await prisma.$disconnect();
-      console.log('🗄️  Prisma disconnected.');
-    } catch (err) {
-      console.error('Error during Prisma disconnect:', err);
-    }
-    process.exit(0);
-  });
-
-  // Force close after 10 seconds if graceful shutdown hangs
-  setTimeout(() => {
-    console.error('❌ Forced shutdown after timeout.');
-    process.exit(1);
-  }, 10_000);
+// Serve uploaded files in development
+if (config.isDevelopment) {
+  app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 }
 
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
-// ─── Global Error Handlers ─────────────────────────────────────
-process.on('uncaughtException', (err: Error) => {
-  console.error('💥 UNCAUGHT EXCEPTION:', err.message);
-  gracefulShutdown('uncaughtException');
+// 404 handler
+app.use((_req, res) => {
+  res.status(404).json({ success: false, error: 'Route not found' });
 });
 
-process.on('unhandledRejection', (reason: unknown) => {
-  console.error('💥 UNHANDLED REJECTION:', reason);
+// Error handler
+app.use(errorHandler);
+
+// Start server
+async function start() {
+  const isDbConnected = await verifyDbConnection();
+  if (!isDbConnected && config.isProduction) {
+    console.error('❌ Database connection failed. Exiting.');
+    process.exit(1);
+  }
+
+  app.listen(config.port, () => {
+    console.log(`🚀 FinanceAI server running on port ${config.port}`);
+    console.log(`📝 Environment: ${config.nodeEnv}`);
+    console.log(`🌐 Frontend URL: ${config.frontendUrl}`);
+    console.log(`💡 AI Features: ${config.groq.apiKey ? 'Enabled (Groq)' : 'Disabled'}`);
+    console.log(`📧 Email: ${config.resend.apiKey ? 'Enabled' : 'Disabled'}`);
+  });
+}
+
+start();
+
+// Graceful shutdown
+async function shutdown(signal: string) {
+  console.log(`\n${signal} received. Shutting down gracefully...`);
+  await prisma.$disconnect();
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+// Unhandled errors
+process.on('unhandledRejection', (reason) => {
+  console.error('💥 Unhandled Rejection:', reason);
 });
 
-process.on('warning', (warning) => {
-  console.warn('⚠️  Node.js warning:', warning.message);
+process.on('uncaughtException', (error) => {
+  console.error('💥 Uncaught Exception:', error);
+  process.exit(1);
 });
 
 export default app;

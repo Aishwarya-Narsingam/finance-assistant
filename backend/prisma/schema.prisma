@@ -3,239 +3,10 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
-
-// ─── User & Auth ───────────────────────────────────────────────
-
-model User {
-  id              String    @id @default(uuid())
-  email           String    @unique
-  password        String?
-  name            String
-  avatar          String?
-  role            Role      @default(USER)
-  isEmailVerified Boolean   @default(false)
-  mfaEnabled      Boolean   @default(false)
-  mfaSecret       String?
-  provider        String    @default("local")
-  providerId      String?
-  onboardingDone  Boolean   @default(false)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-
-  // Relations
-  transactions      Transaction[]
-  budgets           Budget[]
-  savingsGoals      SavingsGoal[]
-  reports           Report[]
-  notifications     Notification[]
-  chatHistories     ChatHistory[]
-  financialInsights FinancialInsight[]
-  bankAccounts      BankAccount[]
-  refreshTokens     RefreshToken[]
-  emailVerifications EmailVerification[]
-  passwordResets    PasswordReset[]
-
-  @@map("users")
-}
-
-model RefreshToken {
-  id        String   @id @default(uuid())
-  token     String   @unique
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-
-  @@map("refresh_tokens")
-}
-
-model EmailVerification {
-  id        String   @id @default(uuid())
-  token     String   @unique
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  expiresAt DateTime
-  used      Boolean  @default(false)
-  createdAt DateTime @default(now())
-
-  @@map("email_verifications")
-}
-
-model PasswordReset {
-  id        String   @id @default(uuid())
-  token     String   @unique
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  expiresAt DateTime
-  used      Boolean  @default(false)
-  createdAt DateTime @default(now())
-
-  @@map("password_resets")
-}
-
-// ─── Transactions ──────────────────────────────────────────────
-
-model Transaction {
-  id          String          @id @default(uuid())
-  amount      Float
-  type        TransactionType
-  category    Category
-  description String?
-  date        DateTime        @default(now())
-  receiptUrl  String?
-  userId      String
-  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
-
-  @@index([userId, date(sort: Desc)])
-  @@index([userId, category])
-  @@map("transactions")
-}
-
-// ─── Budget ────────────────────────────────────────────────────
-
-model Budget {
-  id        String   @id @default(uuid())
-  name      String
-  amount    Float
-  category  Category
-  month     Int
-  year      Int
-  spent     Float    @default(0)
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([userId, category, month, year])
-  @@map("budgets")
-}
-
-// ─── Savings Goals ─────────────────────────────────────────────
-
-model SavingsGoal {
-  id               String     @id @default(uuid())
-  name             String
-  targetAmount     Float
-  currentAmount    Float      @default(0)
-  deadline         DateTime?
-  monthlyTarget    Float?
-  priority         Priority   @default(MEDIUM)
-  status           GoalStatus @default(ACTIVE)
-  userId           String
-  user             User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
-
-  @@index([userId, status])
-  @@map("savings_goals")
-}
-
-// ─── Reports ───────────────────────────────────────────────────
-
-model Report {
-  id        String     @id @default(uuid())
-  type      ReportType
-  startDate DateTime
-  endDate   DateTime
-  data      Json
-  fileUrl   String?
-  userId    String
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime   @default(now())
-
-  @@index([userId, type])
-  @@map("reports")
-}
-
-// ─── Notifications ─────────────────────────────────────────────
-
-model Notification {
-  id        String           @id @default(uuid())
-  title     String
-  message   String
-  type      NotificationType
-  read      Boolean          @default(false)
-  userId    String
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime         @default(now())
-
-  @@index([userId, read])
-  @@map("notifications")
-}
-
-// ─── AI Chat ───────────────────────────────────────────────────
-
-model ChatHistory {
-  id        String   @id @default(uuid())
-  role      String
-  content   String
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
-
-  @@index([userId, createdAt(sort: Desc)])
-  @@map("chat_histories")
-}
-
-// ─── Financial Insights ────────────────────────────────────────
-
-model FinancialInsight {
-  id        String   @id @default(uuid())
-  type      String
-  title     String
-  content   String
-  severity  String   @default("info")
-  read      Boolean  @default(false)
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
-
-  @@index([userId, createdAt(sort: Desc)])
-  @@map("financial_insights")
-}
-
-// ─── Bank Accounts ─────────────────────────────────────────────
-
-model BankAccount {
-  id           String      @id @default(uuid())
-  name         String
-  type         String
-  balance      Float       @default(0)
-  currency     String      @default("INR")
-  plaidToken   String?
-  lastSyncedAt DateTime?
-  isActive     Boolean     @default(true)
-  userId       String
-  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
-
-  @@map("bank_accounts")
-}
-
-// ─── Audit Log ─────────────────────────────────────────────────
-
-model AuditLog {
-  id        String   @id @default(uuid())
-  action    String
-  entity    String
-  entityId  String?
-  userId    String?
-  details   Json?
-  ipAddress String?
-  createdAt DateTime @default(now())
-
-  @@index([createdAt(sort: Desc)])
-  @@map("audit_logs")
-}
-
-// ─── Enums ─────────────────────────────────────────────────────
 
 enum Role {
   USER
@@ -288,4 +59,224 @@ enum NotificationType {
   WEEKLY_REPORT
   MONTHLY_REPORT
   SYSTEM
+}
+
+model User {
+  id              String   @id @default(cuid())
+  email           String   @unique
+  password        String?
+  name            String
+  avatar          String?
+  role            Role     @default(USER)
+  isEmailVerified Boolean  @default(false)
+  mfaEnabled      Boolean  @default(false)
+  mfaSecret       String?
+  provider        String?
+  providerId      String?
+  onboardingDone  Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  refreshTokens     RefreshToken[]
+  emailVerifications EmailVerification[]
+  passwordResets    PasswordReset[]
+  transactions      Transaction[]
+  budgets           Budget[]
+  savingsGoals      SavingsGoal[]
+  reports           Report[]
+  notifications     Notification[]
+  chatHistories     ChatHistory[]
+  financialInsights FinancialInsight[]
+  bankAccounts      BankAccount[]
+  auditLogs         AuditLog[]
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+}
+
+model EmailVerification {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+}
+
+model PasswordReset {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+}
+
+model Transaction {
+  id          String          @id @default(cuid())
+  amount      Float
+  type        TransactionType
+  category    Category
+  description String?
+  date        DateTime
+  receiptUrl  String?
+  userId      String
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, date])
+  @@index([userId, category])
+}
+
+model Budget {
+  id       String   @id @default(cuid())
+  name     String
+  amount   Float
+  category Category
+  month    Int
+  year     Int
+  spent    Float    @default(0)
+  userId   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, category, month, year])
+  @@index([userId, month, year])
+}
+
+model SavingsGoal {
+  id             String     @id @default(cuid())
+  name           String
+  targetAmount   Float
+  currentAmount  Float      @default(0)
+  deadline       DateTime?
+  monthlyTarget  Float?
+  priority       Priority   @default(MEDIUM)
+  status         GoalStatus @default(ACTIVE)
+  userId         String
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Report {
+  id        String     @id @default(cuid())
+  type      ReportType
+  startDate DateTime
+  endDate   DateTime
+  data      Json?
+  fileUrl   String?
+  userId    String
+  createdAt DateTime   @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  title     String
+  message   String
+  type      NotificationType
+  read      Boolean          @default(false)
+  userId    String
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, read])
+}
+
+model ChatHistory {
+  id        String   @id @default(cuid())
+  role      String
+  content   String
+  userId    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, createdAt])
+}
+
+model FinancialInsight {
+  id        String   @id @default(cuid())
+  type      String
+  title     String
+  content   String
+  severity  String   @default("info")
+  read      Boolean  @default(false)
+  userId    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, createdAt])
+}
+
+model BankAccount {
+  id           String   @id @default(cuid())
+  name         String
+  type         String
+  balance      Float    @default(0)
+  currency     String   @default("INR")
+  plaidToken   String?
+  lastSyncedAt DateTime?
+  isActive     Boolean  @default(true)
+  userId       String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  action    String
+  entity    String
+  entityId  String?
+  userId    String?
+  details   Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([action])
 }

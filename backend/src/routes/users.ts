@@ -1,53 +1,43 @@
 import { Router, Response } from 'express';
 import bcrypt from 'bcryptjs';
-import prisma from '../config/prisma';
-import { authenticate } from '../middleware/auth';
-import { AppError } from '../middleware/error';
-import { AuthRequest } from '../types';
-import { updateUserSchema } from '../utils/validators';
-import { uploadToCloudinary } from '../services/cloudinary';
+import { prisma } from '../config/prisma';
 import { asyncHandler } from '../utils/asyncHandler';
+import { AppError } from '../middleware/error';
+import { authenticate } from '../middleware/auth';
+import { updateProfileSchema, changePasswordSchema, onboardingSchema, mfaVerifySchema } from '../utils/validators';
+import { AuthRequest } from '../types';
+import { authenticator } from 'otplib';
+import qrcode from 'qrcode';
 
 const router = Router();
 
-// ─── Get Profile ───────────────────────────────────────────────
+// GET /users/profile
 router.get('/profile', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
   const user = await prisma.user.findUnique({
     where: { id: req.user!.id },
-    select: {
-      id: true, email: true, name: true, avatar: true,
-      role: true, isEmailVerified: true, mfaEnabled: true,
-      provider: true, onboardingDone: true, createdAt: true,
-    },
+    select: { id: true, email: true, name: true, role: true, avatar: true, isEmailVerified: true, mfaEnabled: true, onboardingDone: true, createdAt: true },
   });
-  res.json({ user });
+  res.json({ success: true, data: user });
 }));
 
-// ─── Update Profile ────────────────────────────────────────────
+// PUT /users/profile
 router.put('/profile', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const body = updateUserSchema.parse(req.body);
+  const data = updateProfileSchema.parse(req.body);
   const user = await prisma.user.update({
     where: { id: req.user!.id },
-    data: body,
-    select: {
-      id: true, email: true, name: true, avatar: true,
-      role: true, onboardingDone: true,
-    },
+    data,
+    select: { id: true, email: true, name: true, role: true, avatar: true, isEmailVerified: true, mfaEnabled: true, onboardingDone: true },
   });
-  res.json({ user });
+  res.json({ success: true, data: user, message: 'Profile updated' });
 }));
 
-// ─── Change Password ───────────────────────────────────────────
+// PUT /users/password
 router.put('/password', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { currentPassword, newPassword } = req.body;
-
-  if (!currentPassword || !newPassword) {
-    throw new AppError(400, 'Current and new password are required');
-  }
+  const { currentPassword, newPassword } = changePasswordSchema.parse(req.body);
 
   const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
   if (!user?.password) {
-    throw new AppError(400, 'Account uses OAuth login. Cannot change password.');
+    throw new AppError(400, 'Cannot change password for OAuth accounts');
   }
 
   const isValid = await bcrypt.compare(currentPassword, user.password);
@@ -55,102 +45,96 @@ router.put('/password', authenticate, asyncHandler(async (req: AuthRequest, res:
     throw new AppError(401, 'Current password is incorrect');
   }
 
-  const hashed = await bcrypt.hash(newPassword, 12);
-  await prisma.user.update({
-    where: { id: req.user!.id },
-    data: { password: hashed },
-  });
+  const hashedPassword = await bcrypt.hash(newPassword, 12);
+  await prisma.user.update({ where: { id: user.id }, data: { password: hashedPassword } });
 
-  // Invalidate all refresh tokens
-  await prisma.refreshToken.deleteMany({ where: { userId: req.user!.id } });
-
-  res.json({ message: 'Password changed successfully' });
+  res.json({ success: true, message: 'Password changed successfully' });
 }));
 
-// ─── Upload Avatar ─────────────────────────────────────────────
+// POST /users/avatar
 router.post('/avatar', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { image } = req.body;
-  if (!image) throw new AppError(400, 'Image is required');
+  const { url } = req.body;
+  if (!url) throw new AppError(400, 'Avatar URL is required');
 
-  const url = await uploadToCloudinary(image, 'financeai/avatars');
   const user = await prisma.user.update({
     where: { id: req.user!.id },
     data: { avatar: url },
-    select: { id: true, avatar: true },
+    select: { avatar: true },
   });
-  res.json({ avatar: user.avatar });
+
+  res.json({ success: true, data: user, message: 'Avatar updated' });
 }));
 
-// ─── Complete Onboarding ───────────────────────────────────────
+// POST /users/onboarding
 router.post('/onboarding', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const user = await prisma.user.update({
+  onboardingSchema.parse(req.body);
+
+  await prisma.user.update({
     where: { id: req.user!.id },
     data: { onboardingDone: true },
-    select: { id: true, onboardingDone: true },
   });
-  res.json({ user });
+
+  res.json({ success: true, message: 'Onboarding completed' });
 }));
 
-// ─── Setup MFA ─────────────────────────────────────────────────
+// POST /users/mfa/setup
 router.post('/mfa/setup', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { authenticator } = await import('otplib');
-  const QRCode = await import('qrcode');
-
   const secret = authenticator.generateSecret();
-  const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
-  const otpauthUrl = authenticator.keyuri(user!.email, 'FinanceAI', secret);
+  const otpauth = authenticator.keyuri(req.user!.email, 'FinanceAI', secret);
 
-  // Store secret temporarily (not enabled yet)
+  const qrCode = await qrcode.toDataURL(otpauth);
+
+  // Save secret temporarily
   await prisma.user.update({
     where: { id: req.user!.id },
     data: { mfaSecret: secret },
   });
 
-  const qrCodeDataUrl = await QRCode.toDataURL(otpauthUrl);
-
-  res.json({ secret, qrCode: qrCodeDataUrl, otpauthUrl });
+  res.json({ success: true, data: { secret, qrCode } });
 }));
 
-// ─── Verify & Enable MFA ──────────────────────────────────────
+// POST /users/mfa/verify
 router.post('/mfa/verify', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { code } = req.body;
-  const { authenticator } = await import('otplib');
+  const { token } = mfaVerifySchema.parse(req.body);
 
   const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
   if (!user?.mfaSecret) {
-    throw new AppError(400, 'MFA not set up. Run setup first.');
+    throw new AppError(400, 'MFA not set up. Generate a secret first.');
   }
 
-  const isValid = authenticator.verify({ token: code, secret: user.mfaSecret });
+  const isValid = authenticator.verify({ token, secret: user.mfaSecret });
   if (!isValid) {
-    throw new AppError(400, 'Invalid MFA code');
+    throw new AppError(401, 'Invalid MFA token');
   }
 
   await prisma.user.update({
-    where: { id: req.user!.id },
+    where: { id: user.id },
     data: { mfaEnabled: true },
   });
 
-  res.json({ message: 'MFA enabled successfully' });
+  res.json({ success: true, message: 'MFA enabled successfully' });
 }));
 
-// ─── Disable MFA ───────────────────────────────────────────────
+// POST /users/mfa/disable
 router.post('/mfa/disable', authenticate, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { code } = req.body;
-  const { authenticator } = await import('otplib');
+  const { token } = mfaVerifySchema.parse(req.body);
 
   const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
-  if (!user?.mfaSecret) throw new AppError(400, 'MFA not enabled');
+  if (!user?.mfaSecret) {
+    throw new AppError(400, 'MFA is not enabled');
+  }
 
-  const isValid = authenticator.verify({ token: code, secret: user.mfaSecret });
-  if (!isValid) throw new AppError(400, 'Invalid MFA code');
+  const isValid = authenticator.verify({ token, secret: user.mfaSecret });
+  if (!isValid) {
+    throw new AppError(401, 'Invalid MFA token');
+  }
 
   await prisma.user.update({
-    where: { id: req.user!.id },
+    where: { id: user.id },
     data: { mfaEnabled: false, mfaSecret: null },
   });
 
-  res.json({ message: 'MFA disabled successfully' });
+  res.json({ success: true, message: 'MFA disabled successfully' });
 }));
 
 export default router;

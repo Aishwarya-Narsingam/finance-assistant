@@ -1,47 +1,38 @@
-'use client';
+"use client";
 
-import { Suspense, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { setAccessToken } from '@/lib/api';
-import { Loader2 } from 'lucide-react';
+import { useEffect, useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Loader2 } from "lucide-react";
 
-function CallbackContent() {
-  const router = useRouter();
+export default function AuthCallbackPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const [message, setMessage] = useState("Completing sign in...");
 
   useEffect(() => {
-    const accessToken = searchParams.get('accessToken');
-    const refreshToken = searchParams.get('refreshToken');
-
-    if (accessToken) {
-      setAccessToken(accessToken);
-      if (refreshToken) {
-        document.cookie = `refreshToken=${refreshToken}; path=/; secure; samesite=strict`;
-      }
-      router.push('/dashboard');
+    const token = searchParams.get("token");
+    if (token) {
+      localStorage.setItem("accessToken", token);
+      setMessage("Sign in successful! Redirecting...");
+      setTimeout(() => router.push("/dashboard"), 1000);
     } else {
-      router.push('/auth/login?error=auth_failed');
+      setMessage("Authentication failed. Please try again.");
+      setTimeout(() => router.push("/auth/login"), 2000);
     }
   }, [searchParams, router]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="flex flex-col items-center gap-3">
-        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
-        <p className="text-sm text-gray-500">Signing you in...</p>
-      </div>
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-purple-50 p-4">
+      <Card className="w-full max-w-md">
+        <CardHeader className="text-center">
+          <CardTitle className="text-2xl">Signing In</CardTitle>
+        </CardHeader>
+        <CardContent className="text-center">
+          <Loader2 className="mx-auto h-12 w-12 animate-spin text-indigo-600" />
+          <p className="mt-4 text-muted-foreground">{message}</p>
+        </CardContent>
+      </Card>
     </div>
-  );
-}
-
-export default function AuthCallbackPage() {
-  return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
-      </div>
-    }>
-      <CallbackContent />
-    </Suspense>
   );
 }

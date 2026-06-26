@@ -1,61 +1,38 @@
 import { Request, Response, NextFunction } from 'express';
-import { Prisma } from '@prisma/client';
 import { ZodError } from 'zod';
+import { Prisma } from '@prisma/client';
 
 export class AppError extends Error {
-  constructor(
-    public statusCode: number,
-    message: string,
-    public isOperational = true
-  ) {
+  public statusCode: number;
+  public isOperational: boolean;
+
+  constructor(statusCode: number, message: string, isOperational: boolean = true) {
     super(message);
+    this.statusCode = statusCode;
+    this.isOperational = isOperational;
     Object.setPrototypeOf(this, AppError.prototype);
   }
 }
 
-export function errorHandler(
-  err: Error,
-  _req: Request,
-  res: Response,
-  _next: NextFunction
-) {
-  // Don't log sensitive details in production
-  if (process.env.NODE_ENV === 'development') {
-    console.error('Error:', err);
-  } else {
-    console.error('Error:', err.message);
-  }
+export function errorHandler(err: Error, _req: Request, res: Response, _next: NextFunction): void {
+  console.error('💥 Error:', err);
 
   // Zod validation errors
   if (err instanceof ZodError) {
-    const messages = err.errors.map((e) => `${e.path.join('.')}: ${e.message}`);
     res.status(400).json({
       success: false,
       error: 'Validation failed',
-      message: 'Validation failed',
-      details: messages,
+      details: err.errors.map((e) => `${e.path.join('.')}: ${e.message}`),
     });
     return;
   }
 
-  // Prisma connection/initialization errors (Neon unavailable)
-  if (err instanceof Prisma.PrismaClientInitializationError) {
-    res.status(503).json({
-      success: false,
-      error: 'Database temporarily unavailable',
-      message: 'Database temporarily unavailable. Please try again later.',
-    });
-    return;
-  }
-
-  // Prisma known errors
+  // Prisma known request errors
   if (err instanceof Prisma.PrismaClientKnownRequestError) {
     if (err.code === 'P2002') {
-      const field = (err.meta?.target as string[])?.join(', ') || 'field';
       res.status(409).json({
         success: false,
-        error: `A record with this ${field} already exists`,
-        message: `A record with this ${field} already exists`,
+        error: 'A record with this value already exists',
       });
       return;
     }
@@ -63,45 +40,43 @@ export function errorHandler(
       res.status(404).json({
         success: false,
         error: 'Record not found',
-        message: 'Record not found',
+      });
+      return;
+    }
+    if (err.code === 'P2003') {
+      res.status(400).json({
+        success: false,
+        error: 'Referenced record does not exist',
       });
       return;
     }
   }
 
-  // Prisma validation errors (bad query params)
-  if (err instanceof Prisma.PrismaClientValidationError) {
-    res.status(400).json({
+  // Prisma connection errors
+  if (err instanceof Prisma.PrismaClientInitializationError || err instanceof Prisma.PrismaClientRustPanicError) {
+    res.status(503).json({
       success: false,
-      error: 'Invalid query parameters',
-      message: 'Invalid query parameters',
+      error: 'Database temporarily unavailable',
     });
     return;
   }
 
-  // Custom app errors
+  // Our custom AppError
   if (err instanceof AppError) {
     res.status(err.statusCode).json({
       success: false,
       error: err.message,
-      message: err.message,
     });
     return;
   }
 
-  // Default — never leak stack traces in production
-  const message = process.env.NODE_ENV === 'development' ? err.message : 'Internal server error';
-  res.status(500).json({
+  // Generic server error
+  const statusCode = (err as any).statusCode || 500;
+  const message = process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message;
+
+  res.status(statusCode).json({
     success: false,
     error: message,
-    message,
-  });
-}
-
-export function notFound(_req: Request, res: Response) {
-  res.status(404).json({
-    success: false,
-    error: 'Route not found',
-    message: 'Route not found',
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
   });
 }

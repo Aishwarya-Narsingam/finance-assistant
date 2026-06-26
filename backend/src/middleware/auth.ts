@@ -2,27 +2,30 @@ import { Response, NextFunction } from 'express';
 import { verifyAccessToken } from '../utils/jwt';
 import { AuthRequest } from '../types';
 import { AppError } from './error';
-import prisma from '../config/prisma';
+import { prisma } from '../config/prisma';
 
-export async function authenticate(
-  req: AuthRequest,
-  _res: Response,
-  next: NextFunction
-) {
+export async function authenticate(req: AuthRequest, _res: Response, next: NextFunction): Promise<void> {
   try {
     const authHeader = req.headers.authorization;
-    const token = authHeader?.startsWith('Bearer ')
-      ? authHeader.slice(7)
-      : req.cookies?.accessToken;
-
-    if (!token) {
-      throw new AppError(401, 'Authentication required');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      throw new AppError(401, 'Access token required');
     }
 
-    const payload = verifyAccessToken(token);
+    const token = authHeader.split(' ')[1];
+    const decoded = verifyAccessToken(token);
+
     const user = await prisma.user.findUnique({
-      where: { id: payload.id },
-      select: { id: true, email: true, name: true, role: true },
+      where: { id: decoded.userId },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        avatar: true,
+        isEmailVerified: true,
+        mfaEnabled: true,
+        onboardingDone: true,
+      },
     });
 
     if (!user) {
@@ -40,13 +43,10 @@ export async function authenticate(
   }
 }
 
-export function requireAdmin(
-  req: AuthRequest,
-  _res: Response,
-  next: NextFunction
-) {
-  if (req.user?.role !== 'ADMIN') {
-    return next(new AppError(403, 'Admin access required'));
+export function requireAdmin(req: AuthRequest, _res: Response, next: NextFunction): void {
+  if (!req.user || req.user.role !== 'ADMIN') {
+    next(new AppError(403, 'Admin access required'));
+    return;
   }
   next();
 }

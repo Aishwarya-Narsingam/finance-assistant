@@ -1,103 +1,114 @@
-'use client';
+"use client";
 
-import { Suspense, useState } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { authApi } from '@/lib/api';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent } from '@/components/ui/card';
-import { Loader2, Lock, CheckCircle2 } from 'lucide-react';
+import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { motion } from "framer-motion";
+import { authApi } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Eye, EyeOff, Loader2, CheckCircle } from "lucide-react";
 
-function ResetPasswordContent() {
-  const searchParams = useSearchParams();
+export default function ResetPasswordPage() {
   const router = useRouter();
-  const token = searchParams.get('token');
-  const [password, setPassword] = useState('');
+  const searchParams = useSearchParams();
+  const token = searchParams.get("token") || "";
+
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token) return;
-    setError('');
     setLoading(true);
+    setError("");
+
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters");
+      setLoading(false);
+      return;
+    }
+
     try {
-      await authApi.resetPassword(token, password);
+      await authApi.resetPassword({ token, password });
       setSuccess(true);
-      setTimeout(() => router.push('/auth/login'), 3000);
+      setTimeout(() => router.push("/auth/login"), 2000);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Reset failed');
+      setError(err.response?.data?.error || "Reset failed");
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-white px-4">
-      <div className="w-full max-w-md animate-fade-in">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2 mb-4">
-            <div className="w-10 h-10 bg-black rounded-xl flex items-center justify-center">
-              <span className="text-white font-bold text-lg">F</span>
-            </div>
-            <span className="text-xl font-bold text-gray-900">FinanceAI</span>
-          </div>
-          <h1 className="text-2xl font-bold text-gray-900">Reset password</h1>
-        </div>
+  if (!token) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-purple-50 p-4">
+        <Card>
+          <CardContent className="p-6 text-center">
+            <p className="text-red-600">Invalid reset link. Please request a new one.</p>
+            <Link href="/auth/forgot-password" className="mt-4 inline-block text-indigo-600 hover:text-indigo-700">
+              Request reset link
+            </Link>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
-        <Card className="border-gray-200 shadow-sm">
-          <CardContent className="p-6">
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-purple-50 p-4">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="w-full max-w-md"
+      >
+        <Card>
+          <CardHeader className="text-center">
+            <CardTitle className="text-2xl">Reset Password</CardTitle>
+            <CardDescription>Enter your new password</CardDescription>
+          </CardHeader>
+          <CardContent>
             {success ? (
-              <div className="text-center py-4">
-                <CheckCircle2 className="h-12 w-12 text-emerald-500 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">Password reset!</h3>
-                <p className="text-gray-500 text-sm">Redirecting to login...</p>
+              <div className="text-center">
+                <CheckCircle className="mx-auto mb-4 h-12 w-12 text-green-500" />
+                <p className="text-sm text-muted-foreground">Password reset successfully! Redirecting to login...</p>
               </div>
             ) : (
               <form onSubmit={handleSubmit} className="space-y-4">
-                {error && <div className="bg-red-50 text-red-600 text-sm px-4 py-3 rounded-xl">{error}</div>}
-                {!token && <div className="bg-yellow-50 text-yellow-700 text-sm px-4 py-3 rounded-xl">Invalid or missing reset token.</div>}
-
+                {error && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600">{error}</div>}
                 <div className="space-y-2">
                   <Label htmlFor="password">New Password</Label>
                   <div className="relative">
-                    <Lock className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
                     <Input
                       id="password"
-                      type="password"
-                      placeholder="••••••••"
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Min. 8 characters"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="pl-10"
                       required
-                      minLength={8}
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
                   </div>
                 </div>
-
-                <Button type="submit" className="w-full" disabled={loading || !token}>
-                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Reset Password'}
+                <Button type="submit" className="w-full" disabled={loading}>
+                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Reset Password"}
                 </Button>
               </form>
             )}
           </CardContent>
         </Card>
-      </div>
+      </motion.div>
     </div>
-  );
-}
-
-export default function ResetPasswordPage() {
-  return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
-      </div>
-    }>
-      <ResetPasswordContent />
-    </Suspense>
   );
 }

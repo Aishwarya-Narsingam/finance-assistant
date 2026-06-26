@@ -1,134 +1,193 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { reportsApi } from '@/lib/api';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { formatCurrency, formatDate } from '@/lib/utils';
-import { motion } from 'framer-motion';
-import { FileText, Download, Calendar, TrendingUp, TrendingDown, ArrowUpRight, Loader2 } from 'lucide-react';
+import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { reportsApi } from "@/lib/api";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { formatDate } from "@/lib/utils";
+import { motion } from "framer-motion";
+import { FileText, Plus, Trash2, Loader2, Eye } from "lucide-react";
 
 export default function ReportsPage() {
   const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [type, setType] = useState('MONTHLY');
-  const now = new Date();
-  const [startDate, setStartDate] = useState(new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(now.toISOString().split('T')[0]);
+  const [viewReport, setViewReport] = useState<any>(null);
+  const [form, setForm] = useState({
+    type: "MONTHLY",
+    startDate: "",
+    endDate: "",
+  });
 
   const { data, isLoading } = useQuery({
-    queryKey: ['reports'],
-    queryFn: async () => { const { data } = await reportsApi.list(); return data; },
+    queryKey: ["reports"],
+    queryFn: () => reportsApi.list(),
   });
 
   const generateMutation = useMutation({
-    mutationFn: (d: any) => reportsApi.generate(d),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['reports'] }); setDialogOpen(false); },
+    mutationFn: (data: any) => reportsApi.generate(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
+      setDialogOpen(false);
+    },
   });
 
-  const handleGenerate = () => {
-    generateMutation.mutate({
-      type,
-      startDate: new Date(startDate).toISOString(),
-      endDate: new Date(endDate).toISOString(),
-    });
-  };
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => reportsApi.delete(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["reports"] }),
+  });
+
+  const reports = (data?.data as any)?.data || [];
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Reports</h1>
-          <p className="text-gray-500">Generate and view financial reports</p>
-        </div>
-        <Button onClick={() => setDialogOpen(true)}><FileText className="h-4 w-4 mr-2" /> Generate Report</Button>
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Reports</h1>
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <DialogTrigger asChild>
+            <Button className="gap-2">
+              <Plus className="h-4 w-4" />
+              Generate Report
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Generate Report</DialogTitle>
+              <DialogDescription>Choose a report type and date range.</DialogDescription>
+            </DialogHeader>
+            <form onSubmit={(e) => { e.preventDefault(); generateMutation.mutate(form); }} className="space-y-4">
+              <div className="space-y-2">
+                <Label>Report Type</Label>
+                <select className="w-full rounded-lg border px-3 py-2 text-sm" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+                  <option value="WEEKLY">Weekly</option>
+                  <option value="MONTHLY">Monthly</option>
+                  <option value="YEARLY">Yearly</option>
+                  <option value="CUSTOM">Custom Range</option>
+                </select>
+              </div>
+              {form.type === "CUSTOM" && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Start Date</Label>
+                    <input type="date" className="w-full rounded-lg border px-3 py-2 text-sm" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} required />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>End Date</Label>
+                    <input type="date" className="w-full rounded-lg border px-3 py-2 text-sm" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} required />
+                  </div>
+                </div>
+              )}
+              <DialogFooter>
+                <Button type="submit" disabled={generateMutation.isPending}>
+                  {generateMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Generate
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
 
       {isLoading ? (
-        <div className="text-center py-12 text-gray-400">Loading...</div>
-      ) : data?.reports?.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {data.reports.map((report: any, i: number) => {
-            const summary = report.data?.summary || {};
-            return (
-              <motion.div key={report.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
-                <Card className="card-hover">
-                  <CardContent className="p-5">
-                    <div className="flex items-start justify-between mb-3">
-                      <div>
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-medium">{report.type}</span>
-                        <p className="text-xs text-gray-400 mt-1">{formatDate(report.startDate)} — {formatDate(report.endDate)}</p>
-                      </div>
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${(summary.healthScore || 0) >= 70 ? 'bg-emerald-50' : (summary.healthScore || 0) >= 40 ? 'bg-yellow-50' : 'bg-red-50'}`}>
-                        <TrendingUp className={`h-5 w-5 ${(summary.healthScore || 0) >= 70 ? 'text-emerald-500' : (summary.healthScore || 0) >= 40 ? 'text-yellow-500' : 'text-red-500'}`} />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3 mb-3">
-                      <div className="bg-gray-50 rounded-xl p-3">
-                        <p className="text-xs text-gray-500">Income</p>
-                        <p className="font-semibold text-emerald-600">{formatCurrency(summary.totalIncome || 0)}</p>
-                      </div>
-                      <div className="bg-gray-50 rounded-xl p-3">
-                        <p className="text-xs text-gray-500">Expenses</p>
-                        <p className="font-semibold text-red-600">{formatCurrency(summary.totalExpenses || 0)}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-gray-500">Health Score</span>
-                      <span className="font-bold text-gray-900">{summary.healthScore || 0}/100</span>
-                    </div>
-                    <div className="w-full h-1.5 bg-gray-100 rounded-full mt-2">
-                      <div className="h-full bg-black rounded-full" style={{ width: `${summary.healthScore || 0}%` }} />
-                    </div>
-                    <p className="text-xs text-gray-400 mt-2">{report.data?.transactionCount || 0} transactions analyzed</p>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            );
-          })}
+        <div className="grid gap-4 md:grid-cols-2">
+          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-32 rounded-xl" />)}
         </div>
+      ) : reports.length === 0 ? (
+        <Card>
+          <CardContent className="py-12 text-center text-muted-foreground">
+            <FileText className="mx-auto mb-4 h-12 w-12 text-gray-300" />
+            <p>No reports generated yet. Generate your first report to see your financial health.</p>
+          </CardContent>
+        </Card>
       ) : (
-        <div className="text-center py-16 text-gray-400">
-          <FileText className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-          <p className="text-lg mb-2">No reports yet</p>
-          <p className="text-sm">Generate a report to see your financial analysis</p>
+        <div className="grid gap-4 md:grid-cols-2">
+          {reports.map((report: any) => (
+            <motion.div
+              key={report.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <CardTitle className="text-lg capitalize">{report.type.toLowerCase()} Report</CardTitle>
+                      <CardDescription>
+                        {formatDate(report.startDate)} - {formatDate(report.endDate)}
+                      </CardDescription>
+                    </div>
+                    <Badge variant={report.data?.healthScore >= 70 ? "success" : report.data?.healthScore >= 40 ? "warning" : "destructive"}>
+                      Score: {report.data?.healthScore || "N/A"}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">
+                      Income: ₹{(report.data?.summary?.totalIncome || 0).toLocaleString()}
+                    </span>
+                    <span className="text-muted-foreground">
+                      Expenses: ₹{(report.data?.summary?.totalExpenses || 0).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="mt-3 flex gap-2">
+                    <Button size="sm" variant="outline" className="gap-1" onClick={() => setViewReport(report)}>
+                      <Eye className="h-3.5 w-3.5" />
+                      View
+                    </Button>
+                    <Button size="sm" variant="ghost" className="gap-1 text-red-500" onClick={() => { if (confirm("Delete this report?")) deleteMutation.mutate(report.id); }}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          ))}
         </div>
       )}
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Generate Report</DialogTitle></DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2"><Label>Report Type</Label>
-              <Select value={type} onValueChange={setType}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="WEEKLY">Weekly</SelectItem>
-                  <SelectItem value="MONTHLY">Monthly</SelectItem>
-                  <SelectItem value="YEARLY">Yearly</SelectItem>
-                  <SelectItem value="CUSTOM">Custom</SelectItem>
-                </SelectContent>
-              </Select>
+      {/* View Report Dialog */}
+      <Dialog open={!!viewReport} onOpenChange={(open) => { if (!open) setViewReport(null); }}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Report Details</DialogTitle>
+          </DialogHeader>
+          {viewReport && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-4">
+                <div className="rounded-lg bg-green-50 p-4 text-center">
+                  <p className="text-sm text-muted-foreground">Income</p>
+                  <p className="text-xl font-bold text-green-600">₹{(viewReport.data?.summary?.totalIncome || 0).toLocaleString()}</p>
+                </div>
+                <div className="rounded-lg bg-red-50 p-4 text-center">
+                  <p className="text-sm text-muted-foreground">Expenses</p>
+                  <p className="text-xl font-bold text-red-600">₹{(viewReport.data?.summary?.totalExpenses || 0).toLocaleString()}</p>
+                </div>
+                <div className="rounded-lg bg-blue-50 p-4 text-center">
+                  <p className="text-sm text-muted-foreground">Net Savings</p>
+                  <p className="text-xl font-bold text-blue-600">₹{(viewReport.data?.summary?.netSavings || 0).toLocaleString()}</p>
+                </div>
+              </div>
+              <div>
+                <h3 className="font-medium mb-2">Category Breakdown</h3>
+                <div className="space-y-2">
+                  {Object.entries(viewReport.data?.categoryBreakdown || {}).map(([cat, amount]) => (
+                    <div key={cat} className="flex justify-between rounded-lg border px-3 py-2 text-sm">
+                      <span>{cat}</span>
+                      <span className="font-medium">₹{(amount as number).toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2"><Label>Start Date</Label><Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></div>
-              <div className="space-y-2"><Label>End Date</Label><Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} /></div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-              <Button onClick={handleGenerate} disabled={generateMutation.isPending}>
-                {generateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
-                Generate
-              </Button>
-            </DialogFooter>
-          </div>
+          )}
         </DialogContent>
       </Dialog>
-    </div>
+    </motion.div>
   );
 }

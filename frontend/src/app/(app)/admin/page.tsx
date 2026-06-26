@@ -1,163 +1,234 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { adminApi } from '@/lib/api';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { formatNumber, formatDate, getInitials } from '@/lib/utils';
-import { motion } from 'framer-motion';
-import {
-  Users, Activity, MessageSquare, TrendingUp, Search, Shield, Trash2,
-  UserCheck, BarChart3, Loader2,
-} from 'lucide-react';
+import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { adminApi } from "@/lib/api";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
+import { useAuth } from "@/lib/auth-context";
+import { formatDate } from "@/lib/utils";
+import { motion } from "framer-motion";
+import { Shield, Users, Search, Trash2, ChevronLeft, ChevronRight, Activity } from "lucide-react";
 
 export default function AdminPage() {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<'overview' | 'users' | 'ai'>('overview');
-  const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
+  const [tab, setTab] = useState<"dashboard" | "users" | "audit">("dashboard");
+  const [userPage, setUserPage] = useState(1);
+  const [userSearch, setUserSearch] = useState("");
 
-  const { data: dashData, isLoading: dashLoading } = useQuery({
-    queryKey: ['admin-dashboard'],
-    queryFn: async () => { const { data } = await adminApi.dashboard(); return data; },
+  const { data: dashboardData, isLoading: dashLoading } = useQuery({
+    queryKey: ["admin", "dashboard"],
+    queryFn: () => adminApi.dashboard(),
+    enabled: tab === "dashboard",
   });
 
   const { data: usersData, isLoading: usersLoading } = useQuery({
-    queryKey: ['admin-users', page, search],
-    queryFn: async () => { const { data } = await adminApi.users({ page: String(page), limit: '10', search }); return data; },
-    enabled: tab === 'users',
+    queryKey: ["admin", "users", userPage, userSearch],
+    queryFn: () => adminApi.users({ page: userPage, limit: 20, search: userSearch || undefined }),
+    enabled: tab === "users",
   });
 
-  const { data: aiData } = useQuery({
-    queryKey: ['admin-ai-usage'],
-    queryFn: async () => { const { data } = await adminApi.aiUsage(); return data; },
-    enabled: tab === 'ai',
+  const { data: auditData, isLoading: auditLoading } = useQuery({
+    queryKey: ["admin", "audit"],
+    queryFn: () => adminApi.auditLogs(),
+    enabled: tab === "audit",
   });
 
-  const roleMutation = useMutation({
-    mutationFn: ({ id, role }: any) => adminApi.updateUserRole(id, role),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-users'] }),
-  });
-
-  const deleteMutation = useMutation({
+  const deleteUserMutation = useMutation({
     mutationFn: (id: string) => adminApi.deleteUser(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-users'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin", "users"] }),
   });
 
-  const stats = [
-    { label: 'Total Users', value: dashData?.stats?.totalUsers || 0, icon: Users, color: 'bg-blue-50 text-blue-600' },
-    { label: 'Active Users (7d)', value: dashData?.stats?.activeUsers || 0, icon: UserCheck, color: 'bg-emerald-50 text-emerald-600' },
-    { label: 'Transactions', value: dashData?.stats?.totalTransactions || 0, icon: Activity, color: 'bg-purple-50 text-purple-600' },
-    { label: 'AI Messages', value: dashData?.stats?.totalChatMessages || 0, icon: MessageSquare, color: 'bg-orange-50 text-orange-600' },
+  const dash = (dashboardData?.data as any)?.data;
+  const users = (usersData?.data as any)?.data || [];
+  const userPagination = (usersData?.data as any)?.pagination;
+  const audits = (auditData?.data as any)?.data || [];
+
+  if (user?.role !== "ADMIN") {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center text-red-600">
+          <Shield className="mx-auto mb-4 h-12 w-12" />
+          <p>Admin access required.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const tabs = [
+    { id: "dashboard" as const, label: "Dashboard", icon: Activity },
+    { id: "users" as const, label: "Users", icon: Users },
+    { id: "audit" as const, label: "Audit Logs", icon: Search },
   ];
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2"><Shield className="h-6 w-6" /> Admin Panel</h1>
-        <p className="text-gray-500">Manage users, transactions, and system analytics</p>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
-        {[{ key: 'overview', label: 'Overview' }, { key: 'users', label: 'Users' }, { key: 'ai', label: 'AI Usage' }].map((t) => (
-          <button key={t.key} onClick={() => setTab(t.key as any)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === t.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {tab === 'overview' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {stats.map((s, i) => {
-              const Icon = s.icon;
-              return (
-                <motion.div key={s.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }}>
-                  <Card className="stat-card"><CardContent className="p-6">
-                    <div className="flex items-center justify-between">
-                      <div><p className="text-sm text-gray-500">{s.label}</p><p className="text-2xl font-bold text-gray-900 mt-1">{formatNumber(s.value)}</p></div>
-                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${s.color}`}><Icon className="h-6 w-6" /></div>
-                    </div>
-                  </CardContent></Card>
-                </motion.div>
-              );
-            })}
-          </div>
-
-          {/* Recent Users */}
-          <Card>
-            <CardHeader><CardTitle className="text-base">Recent Users</CardTitle></CardHeader>
-            <CardContent>
-              {dashLoading ? <div className="text-center py-4 text-gray-400">Loading...</div> : (
-                <div className="divide-y divide-gray-100">
-                  {dashData?.recentUsers?.map((u: any) => (
-                    <div key={u.id} className="flex items-center gap-3 py-3">
-                      <div className="w-9 h-9 bg-gray-200 rounded-full flex items-center justify-center"><span className="text-xs font-medium text-gray-600">{getInitials(u.name)}</span></div>
-                      <div className="flex-1"><p className="text-sm font-medium text-gray-900">{u.name}</p><p className="text-xs text-gray-500">{u.email}</p></div>
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${u.role === 'ADMIN' ? 'bg-red-50 text-red-600' : 'bg-gray-100 text-gray-600'}`}>{u.role}</span>
-                      <span className="text-xs text-gray-400">{u._count.transactions} txns</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Admin Panel</h1>
+        <div className="flex gap-1 rounded-lg border p-1">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                tab === t.id ? "bg-indigo-600 text-white" : "text-gray-600 hover:bg-gray-100"
+              }`}
+            >
+              <t.icon className="h-4 w-4" />
+              {t.label}
+            </button>
+          ))}
         </div>
+      </div>
+
+      {tab === "dashboard" && (
+        <>
+          {dashLoading ? (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-32 rounded-xl" />)}
+            </div>
+          ) : dash ? (
+            <>
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <Card>
+                  <CardContent className="p-6">
+                    <p className="text-sm text-muted-foreground">Total Users</p>
+                    <p className="text-2xl font-bold">{dash.totalUsers}</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-6">
+                    <p className="text-sm text-muted-foreground">Active This Month</p>
+                    <p className="text-2xl font-bold">{dash.activeUsersThisMonth}</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-6">
+                    <p className="text-sm text-muted-foreground">Total Transactions</p>
+                    <p className="text-2xl font-bold">{dash.totalTransactions?.toLocaleString()}</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-6">
+                    <p className="text-sm text-muted-foreground">AI Messages (Month)</p>
+                    <p className="text-2xl font-bold">{dash.aiMessagesThisMonth?.toLocaleString()}</p>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {dash.recentLogs?.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Recent Activity</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {dash.recentLogs.map((log: any) => (
+                        <div key={log.id} className="flex items-center justify-between rounded-lg border p-3 text-sm">
+                          <div>
+                            <span className="font-medium">{log.action}</span>
+                            <span className="text-muted-foreground"> by {log.user?.name || "Unknown"}</span>
+                          </div>
+                          <span className="text-xs text-muted-foreground">{formatDate(log.createdAt)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </>
+          ) : null}
+        </>
       )}
 
-      {tab === 'users' && (
+      {tab === "users" && (
         <Card>
-          <CardContent className="p-4">
-            <div className="flex gap-3 mb-4">
-              <div className="relative flex-1"><Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" /><Input placeholder="Search users..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} className="pl-10" /></div>
+          <CardHeader>
+            <div className="flex items-center gap-4">
+              <Input
+                placeholder="Search users..."
+                value={userSearch}
+                onChange={(e) => { setUserSearch(e.target.value); setUserPage(1); }}
+                className="max-w-sm"
+              />
             </div>
-            <div className="divide-y divide-gray-100">
-              {usersLoading ? <div className="text-center py-8 text-gray-400">Loading...</div> : usersData?.users?.map((u: any) => (
-                <div key={u.id} className="flex items-center gap-3 py-3">
-                  <div className="w-9 h-9 bg-gray-200 rounded-full flex items-center justify-center"><span className="text-xs font-medium text-gray-600">{getInitials(u.name)}</span></div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900">{u.name}</p>
-                    <p className="text-xs text-gray-500 truncate">{u.email} · Joined {formatDate(u.createdAt)}</p>
+          </CardHeader>
+          <CardContent>
+            {usersLoading ? (
+              <div className="space-y-3">
+                {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-16 rounded-lg" />)}
+              </div>
+            ) : (
+              <div className="divide-y">
+                {users.map((u: any) => (
+                  <div key={u.id} className="flex items-center justify-between py-3">
+                    <div>
+                      <p className="text-sm font-medium">{u.name}</p>
+                      <p className="text-xs text-muted-foreground">{u.email}</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Badge variant={u.role === "ADMIN" ? "destructive" : "secondary"}>{u.role}</Badge>
+                      <span className="text-xs text-muted-foreground">{u._count?.transactions || 0} txns</span>
+                      {u.role !== "ADMIN" && (
+                        <button
+                          onClick={() => { if (confirm("Delete this user?")) deleteUserMutation.mutate(u.id); }}
+                          className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Select value={u.role} onValueChange={(role) => roleMutation.mutate({ id: u.id, role })}>
-                      <SelectTrigger className="w-[100px] h-8 text-xs"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="USER">User</SelectItem><SelectItem value="ADMIN">Admin</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <button onClick={() => { if (confirm('Delete this user?')) deleteMutation.mutate(u.id); }} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
+            {userPagination?.totalPages > 1 && (
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => setUserPage(p => Math.max(1, p - 1))} disabled={userPage === 1}>
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="text-sm text-muted-foreground">Page {userPagination.page} of {userPagination.totalPages}</span>
+                <Button variant="outline" size="sm" onClick={() => setUserPage(p => Math.min(userPagination.totalPages, p + 1))} disabled={userPage === userPagination.totalPages}>
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
 
-      {tab === 'ai' && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[
-            { label: 'Total Messages', value: aiData?.usage?.totalMessages || 0 },
-            { label: 'This Month', value: aiData?.usage?.messagesThisMonth || 0 },
-            { label: 'This Week', value: aiData?.usage?.messagesThisWeek || 0 },
-            { label: 'Active Chatters', value: aiData?.usage?.activeChatters || 0 },
-          ].map((s, i) => (
-            <motion.div key={s.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }}>
-              <Card className="stat-card"><CardContent className="p-6">
-                <p className="text-sm text-gray-500">{s.label}</p>
-                <p className="text-2xl font-bold text-gray-900 mt-1">{formatNumber(s.value)}</p>
-              </CardContent></Card>
-            </motion.div>
-          ))}
-        </div>
+      {tab === "audit" && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Audit Logs</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {auditLoading ? (
+              <Skeleton className="h-48 rounded-lg" />
+            ) : audits.length === 0 ? (
+              <div className="py-8 text-center text-muted-foreground">No audit logs yet.</div>
+            ) : (
+              <div className="space-y-2">
+                {audits.map((log: any) => (
+                  <div key={log.id} className="flex items-center justify-between rounded-lg border p-3 text-sm">
+                    <div>
+                      <span className="font-medium">{log.action}</span>
+                      <span className="text-muted-foreground"> on {log.entity}</span>
+                      {log.user && <span className="text-muted-foreground"> by {log.user.name}</span>}
+                    </div>
+                    <span className="text-xs text-muted-foreground">{formatDate(log.createdAt)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       )}
-    </div>
+    </motion.div>
   );
 }

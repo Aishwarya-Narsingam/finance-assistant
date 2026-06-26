@@ -1,23 +1,19 @@
 {
   "name": "financeai-backend",
   "version": "1.0.0",
-  "description": "FinanceAI Backend API Server",
+  "description": "FinanceAI Backend - Personal Finance Assistant API",
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "prisma generate && tsc",
+    "build": "tsc",
     "start": "node dist/index.js",
-    "postinstall": "prisma generate",
-    "db:generate": "prisma generate",
-    "db:push": "prisma db push",
-    "db:migrate": "prisma migrate dev",
-    "db:migrate:prod": "prisma migrate deploy",
-    "db:seed": "tsx prisma/seed.ts",
-    "db:studio": "prisma studio"
+    "prisma:generate": "prisma generate",
+    "prisma:push": "prisma db push",
+    "prisma:migrate": "prisma migrate deploy",
+    "prisma:studio": "prisma studio",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@google/genai": "^2.9.0",
-    "@google/generative-ai": "^0.21.0",
     "@prisma/client": "^6.2.0",
     "bcryptjs": "^2.4.3",
     "cloudinary": "^2.5.1",
@@ -26,6 +22,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "express-rate-limit": "^7.5.0",
+    "groq-sdk": "^1.3.0",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
@@ -41,7 +38,7 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/cookie-parser": "^1.4.7",
     "@types/cors": "^2.8.17",
-    "@types/express": "^5.0.0",
+    "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.7",
     "@types/multer": "^1.4.12",
     "@types/node": "^22.12.0",
@@ -50,6 +47,7 @@
     "@types/uuid": "^10.0.0",
     "prisma": "^6.2.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^4.1.9"
   }
 }

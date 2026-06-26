@@ -1,73 +1,78 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
-import { useAuth } from '@/lib/auth-context';
-import { notificationsApi } from '@/lib/api';
-import Link from 'next/link';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useState, useEffect } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import Link from "next/link";
+import { motion, AnimatePresence } from "framer-motion";
+import { useAuth } from "@/lib/auth-context";
+import { useQuery } from "@tanstack/react-query";
+import { notificationsApi } from "@/lib/api";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { getInitials } from "@/lib/utils";
 import {
   LayoutDashboard,
   ArrowLeftRight,
-  PiggyBank,
+  Wallet,
   Target,
-  MessageSquare,
-  BarChart3,
+  Bot,
+  FileText,
   Bell,
   Settings,
-  LogOut,
+  Shield,
   Menu,
   X,
-  Shield,
+  LogOut,
   ChevronLeft,
-} from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { getInitials } from '@/lib/utils';
+  ChevronRight,
+} from "lucide-react";
 
-const NAV_ITEMS = [
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/transactions', label: 'Transactions', icon: ArrowLeftRight },
-  { href: '/budget', label: 'Budget', icon: PiggyBank },
-  { href: '/goals', label: 'Goals', icon: Target },
-  { href: '/ai', label: 'AI Assistant', icon: MessageSquare },
-  { href: '/reports', label: 'Reports', icon: BarChart3 },
-  { href: '/notifications', label: 'Notifications', icon: Bell },
+interface NavItem {
+  label: string;
+  href: string;
+  icon: React.ElementType;
+  adminOnly?: boolean;
+}
+
+const navItems: NavItem[] = [
+  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { label: "Transactions", href: "/transactions", icon: ArrowLeftRight },
+  { label: "Budget", href: "/budget", icon: Wallet },
+  { label: "Goals", href: "/goals", icon: Target },
+  { label: "AI Assistant", href: "/ai", icon: Bot },
+  { label: "Reports", href: "/reports", icon: FileText },
+  { label: "Notifications", href: "/notifications", icon: Bell },
+  { label: "Settings", href: "/settings", icon: Settings },
+  { label: "Admin", href: "/admin", icon: Shield, adminOnly: true },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
   const pathname = usePathname();
-  const { user, loading, logout } = useAuth();
+  const router = useRouter();
+  const { user, loading: authLoading, logout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(0);
+
+  const { data: notifData } = useQuery({
+    queryKey: ["notifications", "unread"],
+    queryFn: () => notificationsApi.list({ read: "false" }),
+    refetchInterval: 30000,
+    enabled: !!user,
+  });
+
+  const unreadCount = (notifData?.data?.data as any)?.unreadCount || 0;
 
   useEffect(() => {
-    if (!loading && !user) {
-      router.push('/auth/login');
+    if (!authLoading && !user) {
+      router.push("/auth/login");
     }
-  }, [user, loading, router]);
+  }, [user, authLoading, router]);
 
-  useEffect(() => {
-    const fetchNotifications = async () => {
-      try {
-        const { data } = await notificationsApi.list({ limit: '1', unreadOnly: 'true' });
-        setUnreadCount(data.unreadCount || 0);
-      } catch {
-        // ignore
-      }
-    };
-    if (user) {
-      fetchNotifications();
-      const interval = setInterval(fetchNotifications, 30000);
-      return () => clearInterval(interval);
-    }
-  }, [user]);
-
-  if (loading) {
+  if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-gray-200 border-t-black rounded-full animate-spin" />
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent" />
       </div>
     );
   }
@@ -75,165 +80,138 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (!user) return null;
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
-      {/* Desktop Sidebar */}
-      <aside className={`hidden lg:flex flex-col bg-white border-r border-gray-200 transition-all duration-300 ${
-        sidebarOpen ? 'w-64' : 'w-20'
-      }`}>
-        <div className="p-4 flex items-center justify-between">
-          {sidebarOpen && (
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-black rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-sm">F</span>
+    <div className="flex min-h-screen bg-gray-50">
+      {/* Mobile overlay */}
+      <AnimatePresence>
+        {mobileOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+            onClick={() => setMobileOpen(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Sidebar */}
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 flex flex-col border-r bg-white transition-all duration-300 lg:static ${
+          sidebarOpen ? "w-64" : "w-16"
+        } ${mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
+      >
+        {/* Logo */}
+        <div className="flex h-16 items-center justify-between border-b px-4">
+          {sidebarOpen ? (
+            <Link href="/dashboard" className="flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-sm font-bold text-white">
+                F
               </div>
-              <span className="font-bold text-gray-900">FinanceAI</span>
+              <span className="font-bold">FinanceAI</span>
+            </Link>
+          ) : (
+            <div className="mx-auto flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-sm font-bold text-white">
+              F
             </div>
           )}
           <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="p-2 rounded-lg hover:bg-gray-100 text-gray-400"
+            onClick={() => {
+              setSidebarOpen(!sidebarOpen);
+              setMobileOpen(false);
+            }}
+            className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 lg:block hidden"
           >
-            <ChevronLeft className={`h-4 w-4 transition-transform ${!sidebarOpen ? 'rotate-180' : ''}`} />
+            {sidebarOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          </button>
+          <button onClick={() => setMobileOpen(false)} className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 lg:hidden">
+            <X className="h-5 w-5" />
           </button>
         </div>
 
-        <nav className="flex-1 px-3 py-2 space-y-1">
-          {NAV_ITEMS.map((item) => {
-            const Icon = item.icon;
-            const active = pathname === item.href;
+        {/* Navigation */}
+        <nav className="flex-1 space-y-1 overflow-y-auto p-3">
+          {navItems.map((item) => {
+            if (item.adminOnly && user.role !== "ADMIN") return null;
+            const isActive = pathname.startsWith(item.href);
             return (
               <Link
                 key={item.href}
                 href={item.href}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                  active
-                    ? 'bg-gray-900 text-white'
-                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                onClick={() => setMobileOpen(false)}
+                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                  isActive
+                    ? "bg-indigo-50 text-indigo-700"
+                    : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                 }`}
-                title={!sidebarOpen ? item.label : undefined}
+                title={sidebarOpen ? undefined : item.label}
               >
-                <Icon className="h-5 w-5 shrink-0" />
-                {sidebarOpen && <span>{item.label}</span>}
-                {item.label === 'Notifications' && unreadCount > 0 && (
-                  <span className="ml-auto bg-red-500 text-white text-xs px-1.5 py-0.5 rounded-full">
-                    {unreadCount > 9 ? '9+' : unreadCount}
-                  </span>
+                <item.icon className={`h-5 w-5 flex-shrink-0 ${isActive ? "text-indigo-600" : "text-gray-400"}`} />
+                {sidebarOpen && (
+                  <>
+                    <span>{item.label}</span>
+                    {item.href === "/notifications" && unreadCount > 0 && (
+                      <Badge className="ml-auto bg-indigo-600 text-white text-xs px-1.5 py-0.5">
+                        {unreadCount > 9 ? "9+" : unreadCount}
+                      </Badge>
+                    )}
+                  </>
                 )}
               </Link>
             );
           })}
-
-          {user.role === 'ADMIN' && (
-            <Link
-              href="/admin"
-              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-all"
-            >
-              <Shield className="h-5 w-5 shrink-0" />
-              {sidebarOpen && <span>Admin Panel</span>}
-            </Link>
-          )}
         </nav>
 
-        <div className="p-3 border-t border-gray-100">
-          <button
-            onClick={logout}
-            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-gray-600 hover:bg-red-50 hover:text-red-600 transition-all w-full"
-          >
-            <LogOut className="h-5 w-5 shrink-0" />
-            {sidebarOpen && <span>Sign Out</span>}
-          </button>
-        </div>
+        {/* User info */}
+        {sidebarOpen && (
+          <div className="border-t p-4">
+            <div className="flex items-center gap-3">
+              <Avatar className="h-8 w-8">
+                <AvatarImage src={user.avatar || undefined} />
+                <AvatarFallback>{getInitials(user.name)}</AvatarFallback>
+              </Avatar>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{user.name}</p>
+                <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+              </div>
+            </div>
+          </div>
+        )}
       </aside>
 
-      {/* Mobile Sidebar */}
-      <AnimatePresence>
-        {mobileOpen && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40 lg:hidden"
-              onClick={() => setMobileOpen(false)}
-            />
-            <motion.aside
-              initial={{ x: -280 }}
-              animate={{ x: 0 }}
-              exit={{ x: -280 }}
-              className="fixed left-0 top-0 bottom-0 w-72 bg-white border-r border-gray-200 z-50 lg:hidden"
-            >
-              <div className="p-4 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 bg-black rounded-lg flex items-center justify-center">
-                    <span className="text-white font-bold text-sm">F</span>
-                  </div>
-                  <span className="font-bold text-gray-900">FinanceAI</span>
-                </div>
-                <button onClick={() => setMobileOpen(false)} className="p-2 rounded-lg hover:bg-gray-100">
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-              <nav className="px-3 py-2 space-y-1">
-                {NAV_ITEMS.map((item) => {
-                  const Icon = item.icon;
-                  const active = pathname === item.href;
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      onClick={() => setMobileOpen(false)}
-                      className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                        active ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
-                      }`}
-                    >
-                      <Icon className="h-5 w-5" />
-                      <span>{item.label}</span>
-                    </Link>
-                  );
-                })}
-              </nav>
-            </motion.aside>
-          </>
-        )}
-      </AnimatePresence>
-
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-h-screen">
+      {/* Main content */}
+      <div className="flex flex-1 flex-col min-w-0">
         {/* Header */}
-        <header className="bg-white border-b border-gray-200 px-4 lg:px-6 h-16 flex items-center justify-between sticky top-0 z-30">
-          <button
-            onClick={() => setMobileOpen(true)}
-            className="lg:hidden p-2 rounded-lg hover:bg-gray-100"
-          >
+        <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-white px-4 lg:px-6">
+          <button onClick={() => setMobileOpen(true)} className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 lg:hidden">
             <Menu className="h-5 w-5" />
           </button>
 
-          <div className="hidden lg:block" />
+          <div className="flex-1" />
 
-          <div className="flex items-center gap-3">
-            <Link href="/notifications" className="relative p-2 rounded-lg hover:bg-gray-100">
-              <Bell className="h-5 w-5 text-gray-600" />
-              {unreadCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-xs w-4 h-4 rounded-full flex items-center justify-center">
-                  {unreadCount > 9 ? '9+' : unreadCount}
-                </span>
-              )}
-            </Link>
+          <Link
+            href="/notifications"
+            className="relative rounded-lg p-2 text-gray-500 hover:bg-gray-100"
+          >
+            <Bell className="h-5 w-5" />
+            {unreadCount > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-medium text-white">
+                {unreadCount > 9 ? "9+" : unreadCount}
+              </span>
+            )}
+          </Link>
 
-            <Link href="/settings" className="flex items-center gap-2 p-1.5 rounded-xl hover:bg-gray-100 transition-colors">
-              <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center">
-                <span className="text-sm font-medium text-gray-600">{getInitials(user.name)}</span>
-              </div>
-              <span className="hidden sm:block text-sm font-medium text-gray-700">{user.name}</span>
-            </Link>
-          </div>
+          <button
+            onClick={logout}
+            className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+          >
+            <LogOut className="h-4 w-4" />
+            <span className="hidden sm:inline">Sign Out</span>
+          </button>
         </header>
 
-        {/* Page Content */}
+        {/* Page content */}
         <main className="flex-1 p-4 lg:p-6">
-          <div className="max-w-7xl mx-auto page-transition">
-            {children}
-          </div>
+          {children}
         </main>
       </div>
     </div>

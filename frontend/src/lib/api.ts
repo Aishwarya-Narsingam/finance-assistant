@@ -1,192 +1,146 @@
-import axios from 'axios';
+import axios, { AxiosInstance, InternalAxiosRequestConfig } from "axios";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 
-const api = axios.create({
-  baseURL: API_BASE,
+const api: AxiosInstance = axios.create({
+  baseURL: API_URL,
   withCredentials: true,
-  headers: { 'Content-Type': 'application/json' },
+  headers: { "Content-Type": "application/json" },
 });
 
-// ─── Token Management ──────────────────────────────────────────
-let accessToken: string | null = null;
-
-export function setAccessToken(token: string | null) {
-  accessToken = token;
-  if (token) {
-    localStorage.setItem('accessToken', token);
-  } else {
-    localStorage.removeItem('accessToken');
-  }
-}
-
-export function getAccessToken(): string | null {
-  if (!accessToken) {
-    accessToken = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
-  }
-  return accessToken;
-}
-
-// ─── Request Interceptor ───────────────────────────────────────
-api.interceptors.request.use((config) => {
-  const token = getAccessToken();
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+// Request interceptor - add auth token
+api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  if (typeof window !== "undefined") {
+    const token = localStorage.getItem("accessToken");
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
   }
   return config;
 });
 
-// ─── Response Interceptor (Token Refresh) ──────────────────────
-let isRefreshing = false;
-let failedQueue: Array<{
-  resolve: (token: string) => void;
-  reject: (error: any) => void;
-}> = [];
-
-function processQueue(error: any, token: string | null) {
-  failedQueue.forEach(({ resolve, reject }) => {
-    if (error) reject(error);
-    else resolve(token!);
-  });
-  failedQueue = [];
-}
-
+// Response interceptor - refresh token on 401
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-
     if (error.response?.status === 401 && !originalRequest._retry) {
-      if (isRefreshing) {
-        return new Promise((resolve, reject) => {
-          failedQueue.push({ resolve, reject });
-        }).then((token) => {
-          originalRequest.headers.Authorization = `Bearer ${token}`;
-          return api(originalRequest);
-        });
-      }
-
       originalRequest._retry = true;
-      isRefreshing = true;
-
       try {
-        const { data } = await axios.post(`${API_BASE}/api/auth/refresh`, {}, {
-          withCredentials: true,
-        });
-        setAccessToken(data.accessToken);
-        processQueue(null, data.accessToken);
-        originalRequest.headers.Authorization = `Bearer ${data.accessToken}`;
-        return api(originalRequest);
-      } catch (refreshError) {
-        processQueue(refreshError, null);
-        setAccessToken(null);
-        if (typeof window !== 'undefined') {
-          window.location.href = '/auth/login';
+        const { data } = await axios.post(`${API_URL}/auth/refresh`, {}, { withCredentials: true });
+        if (data.data?.accessToken) {
+          localStorage.setItem("accessToken", data.data.accessToken);
+          originalRequest.headers.Authorization = `Bearer ${data.data.accessToken}`;
+          return api(originalRequest);
         }
-        return Promise.reject(refreshError);
-      } finally {
-        isRefreshing = false;
+      } catch {
+        localStorage.removeItem("accessToken");
+        if (typeof window !== "undefined") {
+          window.location.href = "/auth/login";
+        }
       }
     }
-
     return Promise.reject(error);
   }
 );
 
-// ─── Auth API ──────────────────────────────────────────────────
+// Auth API
 export const authApi = {
-  register: (data: { email: string; password: string; name: string }) =>
-    api.post('/api/auth/register', data),
-  login: (data: { email: string; password: string; mfaCode?: string }) =>
-    api.post('/api/auth/login', data),
-  logout: () => api.post('/api/auth/logout'),
-  me: () => api.get('/api/auth/me'),
-  forgotPassword: (email: string) => api.post('/api/auth/forgot-password', { email }),
-  resetPassword: (token: string, password: string) =>
-    api.post('/api/auth/reset-password', { token, password }),
-  verifyEmail: (token: string) => api.get(`/api/auth/verify-email?token=${token}`),
+  register: (data: { email: string; password: string; name: string }) => api.post("/auth/register", data),
+  login: (data: { email: string; password: string; mfaToken?: string }) => api.post("/auth/login", data),
+  logout: () => api.post("/auth/logout"),
+  refresh: () => api.post("/auth/refresh"),
+  me: () => api.get("/auth/me"),
+  verifyEmail: (token: string) => api.get(`/auth/verify-email?token=${token}`),
+  forgotPassword: (email: string) => api.post("/auth/forgot-password", { email }),
+  resetPassword: (data: { token: string; password: string }) => api.post("/auth/reset-password", data),
 };
 
-// ─── Users API ─────────────────────────────────────────────────
-export const usersApi = {
-  getProfile: () => api.get('/api/users/profile'),
-  updateProfile: (data: any) => api.put('/api/users/profile', data),
-  changePassword: (data: { currentPassword: string; newPassword: string }) =>
-    api.put('/api/users/password', data),
-  uploadAvatar: (image: string) => api.post('/api/users/avatar', { image }),
-  completeOnboarding: () => api.post('/api/users/onboarding'),
-  setupMfa: () => api.post('/api/users/mfa/setup'),
-  verifyMfa: (code: string) => api.post('/api/users/mfa/verify', { code }),
-  disableMfa: (code: string) => api.post('/api/users/mfa/disable', { code }),
-};
-
-// ─── Transactions API ──────────────────────────────────────────
+// Transactions API
 export const transactionsApi = {
-  list: (params?: any) => api.get('/api/transactions', { params }),
-  summary: () => api.get('/api/transactions/summary'),
-  create: (data: any) => api.post('/api/transactions', data),
-  update: (id: string, data: any) => api.put(`/api/transactions/${id}`, data),
-  delete: (id: string) => api.delete(`/api/transactions/${id}`),
+  list: (params?: Record<string, any>) => api.get("/transactions", { params }),
+  summary: () => api.get("/transactions/summary"),
+  create: (data: any) => api.post("/transactions", data),
+  update: (id: string, data: any) => api.put(`/transactions/${id}`, data),
+  delete: (id: string) => api.delete(`/transactions/${id}`),
 };
 
-// ─── Budgets API ───────────────────────────────────────────────
+// Budgets API
 export const budgetsApi = {
-  list: (params?: any) => api.get('/api/budgets', { params }),
-  create: (data: any) => api.post('/api/budgets', data),
-  update: (id: string, data: any) => api.put(`/api/budgets/${id}`, data),
-  delete: (id: string) => api.delete(`/api/budgets/${id}`),
+  list: (params?: Record<string, any>) => api.get("/budgets", { params }),
+  create: (data: any) => api.post("/budgets", data),
+  update: (id: string, data: any) => api.put(`/budgets/${id}`, data),
+  delete: (id: string) => api.delete(`/budgets/${id}`),
 };
 
-// ─── Goals API ─────────────────────────────────────────────────
+// Goals API
 export const goalsApi = {
-  list: () => api.get('/api/goals'),
-  create: (data: any) => api.post('/api/goals', data),
-  update: (id: string, data: any) => api.put(`/api/goals/${id}`, data),
-  addFunds: (id: string, amount: number) =>
-    api.post(`/api/goals/${id}/add-funds`, { amount }),
-  predict: (id: string) => api.get(`/api/goals/${id}/predict`),
-  delete: (id: string) => api.delete(`/api/goals/${id}`),
+  list: () => api.get("/goals"),
+  create: (data: any) => api.post("/goals", data),
+  update: (id: string, data: any) => api.put(`/goals/${id}`, data),
+  delete: (id: string) => api.delete(`/goals/${id}`),
+  addFunds: (id: string, data: { amount: number }) => api.post(`/goals/${id}/add-funds`, data),
+  predict: (id: string) => api.get(`/goals/${id}/predict`),
 };
 
-// ─── Chat API ──────────────────────────────────────────────────
+// Chat API
 export const chatApi = {
-  send: (message: string) => api.post('/api/chat', { message }),
-  history: () => api.get('/api/chat/history'),
-  clearHistory: () => api.delete('/api/chat/history'),
-  generateBudget: (data: any) => api.post('/api/chat/generate-budget', data),
-  insights: () => api.get('/api/chat/insights'),
-  insightHistory: () => api.get('/api/chat/insights/history'),
-  healthCheck: () => api.get('/api/ai/health'),
-  testApiKey: () => api.get('/api/chat/health/test-key'),
+  send: (message: string) => api.post("/chat", { message }),
+  history: () => api.get("/chat/history"),
+  clearHistory: () => api.delete("/chat/history"),
+  generateBudget: () => api.post("/chat/generate-budget"),
+  insights: () => api.get("/chat/insights"),
+  insightsHistory: () => api.get("/chat/insights/history"),
+  health: () => api.get("/chat/health"),
 };
 
-// ─── Reports API ───────────────────────────────────────────────
+// Reports API
 export const reportsApi = {
-  list: (params?: any) => api.get('/api/reports', { params }),
-  generate: (data: any) => api.post('/api/reports/generate', data),
-  get: (id: string) => api.get(`/api/reports/${id}`),
-  delete: (id: string) => api.delete(`/api/reports/${id}`),
+  list: (params?: Record<string, any>) => api.get("/reports", { params }),
+  generate: (data: any) => api.post("/reports/generate", data),
+  get: (id: string) => api.get(`/reports/${id}`),
+  delete: (id: string) => api.delete(`/reports/${id}`),
 };
 
-// ─── Notifications API ─────────────────────────────────────────
+// Notifications API
 export const notificationsApi = {
-  list: (params?: any) => api.get('/api/notifications', { params }),
-  markRead: (id: string) => api.patch(`/api/notifications/${id}/read`),
-  markAllRead: () => api.patch('/api/notifications/read-all'),
-  delete: (id: string) => api.delete(`/api/notifications/${id}`),
-  checkBudgets: () => api.get('/api/notifications/check-budgets'),
+  list: (params?: Record<string, any>) => api.get("/notifications", { params }),
+  markRead: (id: string) => api.patch(`/notifications/${id}/read`),
+  markAllRead: () => api.patch("/notifications/read-all"),
+  delete: (id: string) => api.delete(`/notifications/${id}`),
+  checkBudgets: () => api.get("/notifications/check-budgets"),
+  sendWeeklyReport: () => api.post("/notifications/send-weekly-report"),
 };
 
-// ─── Admin API ─────────────────────────────────────────────────
+// Users API
+export const usersApi = {
+  profile: () => api.get("/users/profile"),
+  updateProfile: (data: any) => api.put("/users/profile", data),
+  changePassword: (data: { currentPassword: string; newPassword: string }) => api.put("/users/password", data),
+  uploadAvatar: (url: string) => api.post("/users/avatar", { url }),
+  completeOnboarding: (data: any) => api.post("/users/onboarding", data),
+  mfaSetup: () => api.post("/users/mfa/setup"),
+  mfaVerify: (token: string) => api.post("/users/mfa/verify", { token }),
+  mfaDisable: (token: string) => api.post("/users/mfa/disable", { token }),
+};
+
+// Upload API
+export const uploadApi = {
+  image: (formData: FormData) =>
+    api.post("/upload/image", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    }),
+};
+
+// Admin API
 export const adminApi = {
-  dashboard: () => api.get('/api/admin/dashboard'),
-  users: (params?: any) => api.get('/api/admin/users', { params }),
-  updateUserRole: (id: string, role: string) =>
-    api.patch(`/api/admin/users/${id}/role`, { role }),
-  deleteUser: (id: string) => api.delete(`/api/admin/users/${id}`),
-  transactions: (params?: any) => api.get('/api/admin/transactions', { params }),
-  aiUsage: () => api.get('/api/admin/ai-usage'),
-  auditLogs: (params?: any) => api.get('/api/admin/audit-logs', { params }),
+  dashboard: () => api.get("/admin/dashboard"),
+  users: (params?: Record<string, any>) => api.get("/admin/users", { params }),
+  updateUserRole: (id: string, role: string) => api.patch(`/admin/users/${id}/role`, { role }),
+  deleteUser: (id: string) => api.delete(`/admin/users/${id}`),
+  transactions: (params?: Record<string, any>) => api.get("/admin/transactions", { params }),
+  aiUsage: () => api.get("/admin/ai-usage"),
+  auditLogs: (params?: Record<string, any>) => api.get("/admin/audit-logs", { params }),
 };
 
 export default api;

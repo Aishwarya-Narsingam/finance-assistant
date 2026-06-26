@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Eye, EyeOff, Loader2, CheckCircle } from "lucide-react";
 
-export default function ResetPasswordPage() {
+function ResetPasswordForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams.get("token") || "";
@@ -46,69 +46,82 @@ export default function ResetPasswordPage() {
 
   if (!token) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-purple-50 p-4">
-        <Card>
-          <CardContent className="p-6 text-center">
-            <p className="text-red-600">Invalid reset link. Please request a new one.</p>
-            <Link href="/auth/forgot-password" className="mt-4 inline-block text-indigo-600 hover:text-indigo-700">
-              Request reset link
-            </Link>
-          </CardContent>
-        </Card>
-      </div>
+      <Card>
+        <CardContent className="p-6 text-center">
+          <p className="text-red-600">Invalid reset link. Please request a new one.</p>
+          <Link href="/auth/forgot-password" className="mt-4 inline-block text-indigo-600 hover:text-indigo-700">
+            Request reset link
+          </Link>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-purple-50 p-4">
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="w-full max-w-md"
-      >
-        <Card>
-          <CardHeader className="text-center">
-            <CardTitle className="text-2xl">Reset Password</CardTitle>
-            <CardDescription>Enter your new password</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {success ? (
-              <div className="text-center">
-                <CheckCircle className="mx-auto mb-4 h-12 w-12 text-green-500" />
-                <p className="text-sm text-muted-foreground">Password reset successfully! Redirecting to login...</p>
-              </div>
-            ) : (
-              <form onSubmit={handleSubmit} className="space-y-4">
-                {error && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600">{error}</div>}
-                <div className="space-y-2">
-                  <Label htmlFor="password">New Password</Label>
-                  <div className="relative">
-                    <Input
-                      id="password"
-                      type={showPassword ? "text" : "password"}
-                      placeholder="Min. 8 characters"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      required
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                    >
-                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5 }}
+      className="w-full max-w-md"
+    >
+      <Card>
+        <CardHeader className="text-center">
+          <CardTitle className="text-2xl">Reset Password</CardTitle>
+          <CardDescription>Enter your new password</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {success ? (
+            <div className="text-center">
+              <CheckCircle className="mx-auto mb-4 h-12 w-12 text-green-500" />
+              <p className="text-sm text-muted-foreground">Password reset successfully! Redirecting to login...</p>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {error && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600">{error}</div>}
+              <div className="space-y-2">
+                <Label htmlFor="password">New Password</Label>
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    placeholder="Min. 8 characters"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
                 </div>
-                <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Reset Password"}
-                </Button>
-              </form>
-            )}
+              </div>
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Reset Password"}
+              </Button>
+            </form>
+          )}
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-purple-50 p-4">
+      <Suspense fallback={
+        <Card>
+          <CardContent className="p-6 text-center">
+            <Loader2 className="mx-auto h-8 w-8 animate-spin text-indigo-600" />
+            <p className="mt-2 text-sm text-muted-foreground">Loading...</p>
           </CardContent>
         </Card>
-      </motion.div>
+      }>
+        <ResetPasswordForm />
+      </Suspense>
     </div>
   );
 }
